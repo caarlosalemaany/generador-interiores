@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generador de Interiores · Mapas para D&D 5e</title>
+<style>
+  :root{
+    --oro: #c9a64b;
+    --oro-oscuro: #8a6d2f;
+    --negro: #0e0b08;
+    --panel: #171310;
+    --panel2: #1f1914;
+    --pergamino: #e9ddbd;
+    --texto: #d8cdae;
+  }
+  *{ box-sizing: border-box; margin: 0; padding: 0; }
+  html, body{ height: 100%; overflow: hidden; }
+  body{
+    background: var(--negro);
+    color: var(--texto);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    display: flex;
+  }
+  h1, h2, h3, .serif{ font-family: Georgia, 'Times New Roman', serif; color: var(--oro); }
+
+  /* ───── Barra lateral ───── */
+  #panel{
+    width: 300px; min-width: 300px; height: 100%;
+    background: linear-gradient(180deg, var(--panel) 0%, #0d0a07 100%);
+    border-right: 1px solid var(--oro-oscuro);
+    overflow-y: auto; padding: 14px 14px 30px;
+  }
+  #panel::-webkit-scrollbar{ width: 8px; }
+  #panel::-webkit-scrollbar-thumb{ background: #3a2f1d; border-radius: 4px; }
+  #panel h1{
+    font-size: 19px; text-align: center; letter-spacing: 1px;
+    padding-bottom: 8px; margin-bottom: 4px;
+    border-bottom: 2px double var(--oro-oscuro);
+    text-shadow: 0 2px 6px rgba(0,0,0,.8);
+  }
+  #panel .sub{ text-align:center; font-size: 11px; color:#9a8c66; font-style: italic; margin-bottom: 12px; }
+  fieldset{
+    border: 1px solid #4a3b22; border-radius: 6px;
+    padding: 10px; margin-bottom: 12px;
+    background: rgba(255,255,255,0.015);
+  }
+  legend{
+    font-family: Georgia, serif; color: var(--oro);
+    font-size: 13px; padding: 0 6px; letter-spacing: .5px;
+  }
+  label{ display:block; font-size: 12px; color:#b3a47e; margin: 6px 0 2px; }
+  input[type=text], input[type=number], select{
+    width: 100%; padding: 6px 8px;
+    background: #0c0a07; color: var(--pergamino);
+    border: 1px solid #4a3b22; border-radius: 4px;
+    font-family: inherit; font-size: 13px;
+  }
+  input:focus, select:focus{ outline: 1px solid var(--oro-oscuro); }
+  .fila{ display: flex; gap: 6px; }
+  .fila > *{ flex: 1; }
+  button{
+    background: var(--panel2); color: var(--texto);
+    border: 1px solid #5a4827; border-radius: 4px;
+    padding: 7px 10px; cursor: pointer; font-size: 13px;
+    font-family: inherit; transition: background .15s, color .15s;
+  }
+  button:hover{ background: #2c2317; border-color: var(--oro); }
+  button.primario{
+    width: 100%; margin-top: 8px;
+    background: linear-gradient(180deg, #b3923c, #7d6224);
+    color: #14100a; font-weight: bold;
+    font-family: Georgia, serif; letter-spacing: 1px; font-size: 14px;
+    border: 1px solid #e0c068;
+  }
+  button.primario:hover{ background: linear-gradient(180deg, #d4ae49, #94742c); }
+  button.icono{ flex: 0 0 36px; }
+  #herr{ display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  #herr button{ text-align: left; font-size: 12px; padding: 6px 7px; }
+  #herr button.activa{
+    background: var(--oro); color: #14100a; font-weight: bold;
+    border-color: #e0c068;
+  }
+  .check{ display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+  .check label{ margin: 0; cursor: pointer; }
+  .check input{ accent-color: var(--oro); }
+  .nota{ font-size: 11px; color: #8a7c5c; font-style: italic; margin-top: 6px; line-height: 1.4; }
+  #estado-guardado{ font-size: 11px; color: #6f6347; text-align: center; margin-top: 10px; }
+
+  /* ───── Lienzo ───── */
+  #zona-lienzo{ flex: 1; position: relative; background: #060504; }
+  #lienzo{ position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+  #lienzo.pintando{ cursor: crosshair; }
+  #coords{
+    position: absolute; left: 10px; bottom: 8px;
+    font-size: 11px; color: #7d7158;
+    background: rgba(10,8,6,.7); padding: 3px 8px; border-radius: 4px;
+    pointer-events: none; font-family: monospace;
+  }
+  #aviso{
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(20,16,10,.92); border: 1px solid var(--oro-oscuro);
+    color: var(--oro); padding: 6px 16px; border-radius: 6px;
+    font-family: Georgia, serif; font-size: 13px;
+    opacity: 0; transition: opacity .3s; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<aside id="panel">
+  <h1>⚜ Generador de Interiores ⚜</h1>
+  <div class="sub">Mapas de interiores para D&amp;D 5e · 1 casilla = 5 pies</div>
+
+  <fieldset>
+    <legend>Generación</legend>
+    <label for="in-seed">Semilla (seed)</label>
+    <div class="fila">
+      <input type="text" id="in-seed" spellcheck="false">
+      <button class="icono" id="bt-azar" title="Semilla aleatoria">🎲</button>
+    </div>
+    <label for="in-tipo">Tipo de interior</label>
+    <select id="in-tipo">
+      <option value="mazmorra">Mazmorra / cripta</option>
+      <option value="taberna">Taberna / posada</option>
+      <option value="casa">Casa / mansión</option>
+      <option value="templo">Templo / monasterio</option>
+      <option value="torre">Torre de mago</option>
+      <option value="almacen">Almacén / sótano</option>
+    </select>
+    <div class="fila">
+      <div>
+        <label for="in-ancho">Ancho (casillas)</label>
+        <input type="number" id="in-ancho" min="20" max="60" value="40">
+      </div>
+      <div>
+        <label for="in-alto">Alto (casillas)</label>
+        <input type="number" id="in-alto" min="20" max="40" value="30">
+      </div>
+    </div>
+    <button class="primario" id="bt-generar">⚒ Generar mapa</button>
+    <button id="bt-enlace" style="width:100%;margin-top:6px">🔗 Copiar enlace para compartir</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Estética</legend>
+    <select id="in-estetica">
+      <option value="pergamino">Pergamino y tinta</option>
+      <option value="oscuro">Mazmorra oscura</option>
+      <option value="plano">Plano técnico (blueprint)</option>
+      <option value="impresion">Impresión limpia (B/N)</option>
+    </select>
+    <div class="check" style="margin-top:8px">
+      <input type="checkbox" id="in-rejilla" checked>
+      <label for="in-rejilla">Mostrar rejilla</label>
+    </div>
+    <div class="nota">Cambiar la estética no regenera el mapa: solo cambia la presentación.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Editor</legend>
+    <div id="herr">
+      <button data-herr="mano" class="activa">🖐 Mover vista</button>
+      <button data-herr="suelo">▦ Pintar suelo</button>
+      <button data-herr="muro">▣ Pintar muro</button>
+      <button data-herr="puerta">🚪 Puerta</button>
+      <button data-herr="mobiliario">🪑 Mobiliario</button>
+      <button data-herr="etiqueta">✎ Etiqueta</button>
+      <button data-herr="borrar">⌫ Borrador</button>
+    </div>
+    <div id="caja-mob" style="display:none">
+      <label for="in-mob">Objeto a colocar</label>
+      <select id="in-mob"></select>
+    </div>
+    <div class="fila" style="margin-top:8px">
+      <button id="bt-deshacer">↩ Deshacer</button>
+      <button id="bt-rehacer">↪ Rehacer</button>
+    </div>
+    <div class="nota">Rueda: zoom · botón derecho o herramienta «Mover vista»: desplazar · Las ediciones se guardan solas en este navegador.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Exportación</legend>
+    <div class="check">
+      <input type="checkbox" id="in-rejilla-png" checked>
+      <label for="in-rejilla-png">Incluir rejilla en el PNG</label>
+    </div>
+    <button id="bt-png" style="width:100%">⬇ Descargar PNG (alta resolución)</button>
+    <div class="fila" style="margin-top:6px">
+      <button id="bt-exp-json">Exportar JSON</button>
+      <button id="bt-imp-json">Importar JSON</button>
+    </div>
+    <input type="file" id="in-archivo" accept=".json,application/json" style="display:none">
+  </fieldset>
+
+  <div id="estado-guardado"></div>
+</aside>
+
+<main id="zona-lienzo">
+  <canvas id="lienzo"></canvas>
+  <div id="coords"></div>
+  <div id="aviso"></div>
+</main>
+
+<script>
+'use strict';
+/* ════════════════════════════════════════════════════════════════
+   GENERADOR PROCEDURAL DE MAPAS DE INTERIORES — D&D 5e
+   Web estática sin dependencias. PRNG determinista (mulberry32).
+   ════════════════════════════════════════════════════════════════ */
+
+/* ───── PRNG sembrable ───── */
+function xmur3(str){
+  let h = 1779033703 ^ str.length;
+  for(let i = 0; i < str.length; i++){
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function(){
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    return (h ^= h >>> 16) >>> 0;
+  };
+}
+function mulberry32(a){
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const ri    = (rnd, a, b) => a + Math.floor(rnd() * (b - a + 1));
+const elegir = (rnd, arr) => arr[Math.floor(rnd() * arr.length)];
+function barajar(rnd, arr){
+  const a = arr.slice();
+  for(let i = a.length - 1; i > 0; i--){
+    const j = Math.floor(rnd() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/* ───── Tipos de casilla ───── */
+const T = { ROCA: 0, SUELO: 1, MURO: 2, PUERTA: 3, SECRETA: 4 };
+const esPiso = t => t === T.SUELO || t === T.PUERTA || t === T.SECRETA;
+
+/* ───── Estado global del mapa ───── */
+const E = {
+  seed: '', tipo: 'mazmorra', cols: 40, rows: 30, estetica: 'pergamino',
+  tiles: [], mob: [], etq: [], enlaces: []   // enlaces: pares de casillas unidas por escaleras (torre)
+};
+
+const idx    = (x, y) => y * E.cols + x;
+const dentro = (x, y) => x >= 0 && y >= 0 && x < E.cols && y < E.rows;
+const getT   = (x, y) => dentro(x, y) ? E.tiles[idx(x, y)] : T.ROCA;
+function setT(x, y, v){ if(dentro(x, y)) E.tiles[idx(x, y)] = v; }
+
+function carve(x, y, w, h){
+  for(let j = y; j < y + h; j++)
+    for(let i = x; i < x + w; i++)
+      if(dentro(i, j) && getT(i, j) !== T.PUERTA) setT(i, j, T.SUELO);
+}
+function carveCirc(cx, cy, r){
+  for(let j = cy - r; j <= cy + r; j++)
+    for(let i = cx - r; i <= cx + r; i++){
+      const dx = i - cx, dy = j - cy;
+      if(dx*dx + dy*dy <= r*r + 0.5 && dentro(i, j)) setT(i, j, T.SUELO);
+    }
+}
+function lineaSuelo(x1, y1, x2, y2){
+  if(y1 === y2){
+    for(let i = Math.min(x1,x2); i <= Math.max(x1,x2); i++)
+      if(getT(i, y1) !== T.PUERTA) setT(i, y1, T.SUELO);
+  } else {
+    for(let j = Math.min(y1,y2); j <= Math.max(y1,y2); j++)
+      if(getT(x1, j) !== T.PUERTA) setT(x1, j, T.SUELO);
+  }
+}
+function pasilloL(x1, y1, x2, y2, horizPrimero){
+  if(horizPrimero){ lineaSuelo(x1, y1, x2, y1); lineaSuelo(x2, y1, x2, y2); }
+  else            { lineaSuelo(x1, y1, x1, y2); lineaSuelo(x1, y2, x2, y2); }
+}
+function murosAuto(){
+  for(let y = 0; y < E.rows; y++)
+    for(let x = 0; x < E.cols; x++){
+      if(E.tiles[idx(x,y)] !== T.ROCA) continue;
+      let vecino = false;
+      for(let dy = -1; dy <= 1 && !vecino; dy++)
+        for(let dx = -1; dx <= 1; dx++){
+          if(!dx && !dy) continue;
+          if(esPiso(getT(x+dx, y+dy))){ vecino = true; break; }
+        }
+      if(vecino) E.tiles[idx(x,y)] = T.MURO;
+    }
+}
+function addMob(x, y, t){
+  if(!dentro(x, y) || !esPiso(getT(x, y))) return;
+  if(E.mob.some(m => m.x === x && m.y === y)) return;
+  E.mob.push({ x, y, t });
+}
+function addEtq(x, y, texto){ E.etq.push({ x, y, texto }); }
+function quitarMobEn(x, y){ E.mob = E.mob.filter(m => !(m.x === x && m.y === y)); }
+
+/* ───── Conectividad: todas las salas alcanzables, siempre ───── */
+function componentes(){
+  const lab = new Int32Array(E.cols * E.rows).fill(-1);
+  const comps = [];
+  for(let y = 0; y < E.rows; y++)
+    for(let x = 0; x < E.cols; x++){
+      if(!esPiso(E.tiles[idx(x,y)]) || lab[idx(x,y)] >= 0) continue;
+      const id = comps.length, cola = [[x,y]], celdas = [];
+      lab[idx(x,y)] = id;
+      while(cola.length){
+        const [cx, cy] = cola.pop();
+        celdas.push([cx, cy]);
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+          const nx = cx+dx, ny = cy+dy;
+          if(dentro(nx,ny) && esPiso(E.tiles[idx(nx,ny)]) && lab[idx(nx,ny)] < 0){
+            lab[idx(nx,ny)] = id; cola.push([nx,ny]);
+          }
+        }
+      }
+      comps.push(celdas);
+    }
+  // unir componentes enlazadas por escaleras (torre de mago)
+  const padre = comps.map((_, i) => i);
+  const buscar = i => padre[i] === i ? i : (padre[i] = buscar(padre[i]));
+  for(const [a, b] of E.enlaces){
+    const la = dentro(a[0],a[1]) ? lab[idx(a[0],a[1])] : -1;
+    const lb = dentro(b[0],b[1]) ? lab[idx(b[0],b[1])] : -1;
+    if(la >= 0 && lb >= 0) padre[buscar(la)] = buscar(lb);
+  }
+  const grupos = new Map();
+  comps.forEach((c, i) => {
+    const r = buscar(i);
+    if(!grupos.has(r)) grupos.set(r, []);
+    grupos.get(r).push(...c);
+  });
+  return [...grupos.values()];
+}
+function asegurarConectividad(rnd){
+  for(let iter = 0; iter < 15; iter++){
+    const g = componentes();
+    if(g.length <= 1) break;
+    g.sort((a, b) => b.length - a.length);
+    const paso = arr => arr.filter((_, i) => i % Math.max(1, Math.floor(arr.length / 200)) === 0);
+    const A = paso(g[0]), B = paso(g[1]);
+    let mejor = null, md = Infinity;
+    for(const a of A) for(const b of B){
+      const d = Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]);
+      if(d < md){ md = d; mejor = [a, b]; }
+    }
+    if(!mejor) break;
+    pasilloL(mejor[0][0], mejor[0][1], mejor[1][0], mejor[1][1], rnd() < 0.5);
+    murosAuto();
+  }
+}
+
+/* ───── BSP ───── */
+function bsp(x, y, w, h, rnd, min, prof){
+  const puedeV = w >= min * 2 + 1, puedeH = h >= min * 2 + 1;
+  if(prof <= 0 || (!puedeV && !puedeH)) return [{ x, y, w, h }];
+  let vertical;
+  if(puedeV && puedeH) vertical = (w > h) ? rnd() < 0.8 : rnd() < 0.2;
+  else vertical = puedeV;
+  if(vertical){
+    const c = x + min + Math.floor(rnd() * (w - 2 * min));
+    return bsp(x, y, c - x, h, rnd, min, prof - 1)
+      .concat(bsp(c + 1, y, x + w - c - 1, h, rnd, min, prof - 1));
+  } else {
+    const f = y + min + Math.floor(rnd() * (h - 2 * min));
+    return bsp(x, y, w, f - y, rnd, min, prof - 1)
+      .concat(bsp(x, f + 1, w, y + h - f - 1, rnd, min, prof - 1));
+  }
+}
+const enRect = (s, x, y) => x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h;
+const centro = s => [Math.floor(s.x + s.w / 2), Math.floor(s.y + s.h / 2)];
+
+/* puertas entre salas adyacentes que comparten línea de muro (casa, taberna…) */
+function puertasAdyacentes(salas, rnd, extra){
+  const pares = [];
+  for(let i = 0; i < salas.length; i++)
+    for(let j = i + 1; j < salas.length; j++){
+      const A = salas[i], B = salas[j];
+      if(B.x === A.x + A.w + 1 || A.x === B.x + B.w + 1){
+        const wc = (B.x === A.x + A.w + 1) ? A.x + A.w : B.x + B.w;
+        const y0 = Math.max(A.y, B.y), y1 = Math.min(A.y + A.h, B.y + B.h) - 1;
+        if(y1 >= y0) pares.push({ i, j, x: wc, ys: [y0, y1], vert: true });
+      }
+      if(B.y === A.y + A.h + 1 || A.y === B.y + B.h + 1){
+        const wf = (B.y === A.y + A.h + 1) ? A.y + A.h : B.y + B.h;
+        const x0 = Math.max(A.x, B.x), x1 = Math.min(A.x + A.w, B.x + B.w) - 1;
+        if(x1 >= x0) pares.push({ i, j, y: wf, xs: [x0, x1], vert: false });
+      }
+    }
+  const padre = salas.map((_, i) => i);
+  const buscar = i => padre[i] === i ? i : (padre[i] = buscar(padre[i]));
+  for(const p of barajar(rnd, pares)){
+    const ra = buscar(p.i), rb = buscar(p.j);
+    const poner = ra !== rb || rnd() < (extra || 0.12);
+    if(!poner) continue;
+    if(ra !== rb) padre[ra] = rb;
+    if(p.vert) setT(p.x, ri(rnd, p.ys[0], p.ys[1]), T.PUERTA);
+    else       setT(ri(rnd, p.xs[0], p.xs[1]), p.y, T.PUERTA);
+  }
+}
+
+/* ════════════ GENERADORES POR TIPO ════════════ */
+const GEN = {};
+
+/* 1 · Mazmorra / cripta */
+GEN.mazmorra = function(rnd){
+  const hojas = bsp(1, 1, E.cols - 2, E.rows - 2, rnd, 7, 5);
+  const salas = [];
+  for(const h of hojas){
+    const rw = ri(rnd, 4, Math.max(4, h.w - 3));
+    const rh = ri(rnd, 4, Math.max(4, h.h - 3));
+    const rx = h.x + 1 + ri(rnd, 0, Math.max(0, h.w - rw - 2));
+    const ry = h.y + 1 + ri(rnd, 0, Math.max(0, h.h - rh - 2));
+    const s = { x: rx, y: ry, w: rw, h: rh };
+    if(rnd() < 0.25 && rw >= 5 && rh >= 5){
+      const r = Math.floor(Math.min(rw, rh) / 2);
+      carveCirc(rx + Math.floor(rw/2), ry + Math.floor(rh/2), r);
+      s.circular = true;
+    } else carve(rx, ry, rw, rh);
+    salas.push(s);
+  }
+  // pasillos: árbol de expansión (Prim) + algún bucle
+  const con = [0], resto = salas.map((_, i) => i).slice(1);
+  while(resto.length){
+    let mejor = null, md = Infinity;
+    for(const i of con) for(const j of resto){
+      const [ax, ay] = centro(salas[i]), [bx, by] = centro(salas[j]);
+      const d = Math.abs(ax-bx) + Math.abs(ay-by);
+      if(d < md){ md = d; mejor = [i, j]; }
+    }
+    const [a, b] = mejor;
+    const [ax, ay] = centro(salas[a]), [bx, by] = centro(salas[b]);
+    pasilloL(ax, ay, bx, by, rnd() < 0.5);
+    con.push(b); resto.splice(resto.indexOf(b), 1);
+  }
+  for(let k = 0; k < Math.floor(salas.length / 4); k++){
+    const a = elegir(rnd, salas), b = elegir(rnd, salas);
+    if(a !== b){
+      const [ax, ay] = centro(a), [bx, by] = centro(b);
+      pasilloL(ax, ay, bx, by, rnd() < 0.5);
+    }
+  }
+  murosAuto();
+  // puertas en las entradas de las salas
+  for(let y = 1; y < E.rows - 1; y++)
+    for(let x = 1; x < E.cols - 1; x++){
+      if(getT(x, y) !== T.SUELO) continue;
+      if(salas.some(s => enRect(s, x, y))) continue;
+      const L = getT(x-1,y), R = getT(x+1,y), U = getT(x,y-1), D = getT(x,y+1);
+      const hor = esPiso(L) && esPiso(R) && U === T.MURO && D === T.MURO;
+      const ver = esPiso(U) && esPiso(D) && L === T.MURO && R === T.MURO;
+      if(!hor && !ver) continue;
+      if([L,R,U,D].includes(T.PUERTA)) continue;
+      const tocaSala = [[1,0],[-1,0],[0,1],[0,-1]]
+        .some(([dx,dy]) => salas.some(s => enRect(s, x+dx, y+dy)));
+      if(tocaSala && rnd() < 0.8) setT(x, y, T.PUERTA);
+    }
+  // roles, etiquetas y mobiliario
+  const roles = barajar(rnd, ['Cripta','Osario','Sala de guardia','Despensa olvidada',
+    'Sala del trono','Santuario profanado','Armería','Tesorería','Antecámara',
+    'Mausoleo','Sala de columnas','Pozo ritual','Celdas','Guarida']);
+  salas.forEach((s, i) => {
+    const rol = roles[i % roles.length];
+    const [cx, cy] = centro(s);
+    addEtq(s.x + s.w / 2, s.y + 0.7, rol);
+    if(i === 0) addMob(cx, cy, 'escalera_arriba');
+    else if(i === salas.length - 1) addMob(cx, cy, 'escalera_abajo');
+    switch(rol){
+      case 'Cripta': case 'Mausoleo':
+        addMob(cx, cy, 'sarcofago');
+        if(s.w >= 6){ addMob(s.x+1, s.y+1, 'columna'); addMob(s.x+s.w-2, s.y+1, 'columna'); }
+        break;
+      case 'Osario': addMob(s.x+1, cy, 'caja'); addMob(s.x+s.w-2, cy, 'caja'); break;
+      case 'Sala de guardia': addMob(cx, cy, 'mesa'); addMob(cx+1, cy, 'silla'); addMob(s.x+1, s.y+1, 'estanteria'); break;
+      case 'Despensa olvidada': case 'Celdas': addMob(s.x+1, s.y+1, 'barril'); addMob(s.x+1, s.y+2, 'barril'); break;
+      case 'Sala del trono': addMob(cx, s.y+1, 'altar'); addMob(s.x+1, cy, 'columna'); addMob(s.x+s.w-2, cy, 'columna'); break;
+      case 'Santuario profanado': case 'Pozo ritual': addMob(cx, cy, 'altar'); addMob(cx-2, cy, 'brasero'); addMob(cx+2, cy, 'brasero'); break;
+      case 'Armería': addMob(s.x+1, s.y+1, 'estanteria'); addMob(s.x+1, s.y+3, 'estanteria'); break;
+      case 'Tesorería': addMob(cx, cy, 'cofre'); addMob(cx+1, cy+1, 'cofre'); break;
+      case 'Sala de columnas':
+        for(let yy = s.y+1; yy < s.y+s.h-1; yy += 2)
+          for(let xx = s.x+1; xx < s.x+s.w-1; xx += 3) addMob(xx, yy, 'columna');
+        break;
+      default: if(rnd() < 0.5) addMob(cx, cy, 'cofre');
+    }
+  });
+  // trampas en pasillos
+  let trampas = ri(rnd, 1, 3), intentos = 0;
+  while(trampas > 0 && intentos++ < 200){
+    const x = ri(rnd, 1, E.cols-2), y = ri(rnd, 1, E.rows-2);
+    if(getT(x,y) === T.SUELO && !salas.some(s => enRect(s,x,y)) && !E.mob.some(m => m.x===x && m.y===y)){
+      addMob(x, y, 'trampa'); trampas--;
+    }
+  }
+};
+
+/* 2 · Taberna / posada */
+GEN.taberna = function(rnd){
+  const x0 = 2, y0 = 2, x1 = E.cols - 3, y1 = E.rows - 3;
+  const W = x1 - x0 + 1, H = y1 - y0 + 1;
+  const hT = Math.min(7, Math.max(4, Math.floor(H * 0.32)));
+  // salón
+  carve(x0, y0 + hT + 1, W, y1 - (y0 + hT));
+  // ala superior: cocina + despensa + habitaciones
+  const cocinaW = Math.min(9, Math.max(5, Math.floor(W / 4)));
+  const piezas = [];
+  let cur = x0, n = 0;
+  while(cur <= x1 - 3){
+    let w, nombre;
+    if(n === 0){ w = cocinaW; nombre = 'Cocina'; }
+    else if(n === 1){ w = 4; nombre = 'Despensa'; }
+    else { w = 5; nombre = 'Habitación ' + (n - 1); }
+    if(cur + w - 1 > x1 || x1 - (cur + w) < 3) w = x1 - cur + 1;  // la última absorbe el resto
+    carve(cur, y0, w, hT);
+    piezas.push({ x: cur, y: y0, w, h: hT, nombre });
+    setT(cur + Math.floor(w / 2), y0 + hT, T.PUERTA);
+    cur += w + 1; n++;
+  }
+  murosAuto();
+  // barra frente a la cocina
+  const yBarra = y0 + hT + 2;
+  for(let x = x0 + 1; x < x0 + cocinaW; x++) addMob(x, yBarra, 'barra');
+  // mesas con sillas en el salón
+  for(let y = y0 + hT + 4; y <= y1 - 1; y += 3)
+    for(let x = x0 + 2; x <= x1 - 2; x += 4){
+      if(y <= yBarra + 1 && x < x0 + cocinaW + 2) continue;
+      if(rnd() < 0.7){
+        addMob(x, y, 'mesa');
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]])
+          if(rnd() < 0.75) addMob(x+dx, y+dy, 'silla');
+      }
+    }
+  addMob(x1, y0 + hT + 3, 'chimenea');
+  // mobiliario del ala superior
+  for(const p of piezas){
+    const [cx, cy] = centro(p);
+    addEtq(p.x + p.w / 2, p.y + 0.7, p.nombre);
+    if(p.nombre === 'Cocina'){ addMob(p.x + 1, p.y + 1, 'chimenea'); addMob(cx, cy, 'mesa_larga'); addMob(p.x + p.w - 2, p.y + 1, 'barril'); }
+    else if(p.nombre === 'Despensa'){ addMob(p.x+1, p.y+1, 'barril'); addMob(p.x+1, p.y+2, 'barril'); addMob(p.x+2, p.y+1, 'caja'); }
+    else { addMob(p.x + 1, p.y + 1, 'cama'); addMob(p.x + p.w - 2, p.y + p.h - 2, 'cofre'); }
+  }
+  addEtq(x0 + W / 2, y0 + hT + 1.7, 'Salón');
+  addEtq(x0 + cocinaW / 2 + 0.5, yBarra + 1.2, 'Barra');
+  // entrada doble al sur
+  const ex = Math.floor((x0 + x1) / 2);
+  setT(ex, y1 + 1, T.PUERTA); setT(ex + 1, y1 + 1, T.PUERTA);
+  murosAuto();
+};
+
+/* 3 · Casa / mansión */
+GEN.casa = function(rnd){
+  const x0 = 2, y0 = 2, W = E.cols - 4, H = E.rows - 4;
+  const salas = bsp(x0, y0, W, H, rnd, 5, 5);
+  for(const s of salas) carve(s.x, s.y, s.w, s.h);
+  murosAuto();
+  puertasAdyacentes(salas, rnd, 0.12);
+  // entrada: en la sala que llega más abajo
+  let entrada = salas[0];
+  for(const s of salas) if(s.y + s.h > entrada.y + entrada.h) entrada = s;
+  setT(entrada.x + Math.floor(entrada.w / 2), entrada.y + entrada.h, T.PUERTA);
+  // roles por tamaño
+  const orden = salas.slice().sort((a, b) => b.w * b.h - a.w * a.h);
+  const roles = ['Salón', 'Comedor', 'Cocina', 'Dormitorio principal', 'Estudio',
+                 'Dormitorio', 'Biblioteca', 'Despensa', 'Baño', 'Dormitorio'];
+  orden.forEach((s, i) => {
+    let rol = roles[Math.min(i, roles.length - 1)];
+    if(s === entrada) rol = 'Vestíbulo';
+    const [cx, cy] = centro(s);
+    addEtq(s.x + s.w / 2, s.y + 0.7, rol);
+    switch(rol){
+      case 'Salón': addMob(s.x + 1, cy, 'chimenea'); addMob(cx, cy, 'mesa'); addMob(cx+1, cy, 'silla'); addMob(cx-1, cy, 'silla'); break;
+      case 'Comedor': addMob(cx, cy, 'mesa_larga'); addMob(cx, cy-1, 'silla'); addMob(cx, cy+1, 'silla'); addMob(cx-1, cy, 'silla'); addMob(cx+1, cy, 'silla'); break;
+      case 'Cocina': addMob(s.x+1, s.y+1, 'chimenea'); addMob(cx, cy, 'mesa_larga'); addMob(s.x+s.w-2, s.y+1, 'barril'); break;
+      case 'Dormitorio principal': case 'Dormitorio': addMob(s.x+1, s.y+1, 'cama'); addMob(s.x+s.w-2, s.y+s.h-2, 'cofre'); break;
+      case 'Estudio': addMob(cx, cy, 'mesa'); addMob(cx+1, cy, 'silla'); addMob(s.x+1, s.y+1, 'estanteria'); break;
+      case 'Biblioteca': addMob(s.x+1, s.y+1, 'estanteria'); addMob(s.x+1, s.y+3, 'estanteria'); addMob(s.x+s.w-2, s.y+1, 'estanteria'); break;
+      case 'Despensa': addMob(s.x+1, s.y+1, 'barril'); addMob(s.x+2, s.y+1, 'caja'); break;
+      case 'Baño': addMob(s.x+1, s.y+1, 'barril'); break;
+      case 'Vestíbulo': if(s.w >= 5) addMob(s.x+1, s.y+1, 'banco'); break;
+    }
+  });
+};
+
+/* 4 · Templo / monasterio */
+GEN.templo = function(rnd){
+  const x0 = 2, y0 = 2, x1 = E.cols - 3, y1 = E.rows - 3;
+  const cx = Math.floor(E.cols / 2);
+  const nw2 = Math.max(2, Math.floor(E.cols / 8));
+  // nave central + presbiterio
+  carve(cx - nw2, y0 + 1, nw2 * 2 + 1, y1 - y0 - 1);
+  carve(cx - nw2 - 2, y0, nw2 * 2 + 5, 5);
+  addMob(cx, y0 + 1, 'altar');
+  addMob(cx - nw2 - 1, y0 + 1, 'brasero');
+  addMob(cx + nw2 + 1, y0 + 1, 'brasero');
+  addEtq(cx + 0.5, y0 + 0.4, 'Presbiterio');
+  addEtq(cx + 0.5, y0 + 7.5, 'Nave');
+  // columnas
+  for(let y = y0 + 7; y <= y1 - 3; y += 3){
+    addMob(cx - nw2 + 1, y, 'columna');
+    addMob(cx + nw2 - 1, y, 'columna');
+  }
+  // bancos
+  for(let y = y0 + 9; y <= y1 - 3; y += 2){
+    if(nw2 >= 3){ addMob(cx - 2, y, 'banco'); addMob(cx + 2, y, 'banco'); }
+    else addMob(cx, y, 'banco');
+  }
+  // celdas laterales pegadas a la nave
+  const celdaW = 4, celdaH = 4;
+  const xcl = cx - nw2 - celdaW - 1, xcr = cx + nw2 + 2;
+  let nCelda = 1;
+  if(xcl >= x0){
+    for(let yC = y0 + 7; yC + celdaH <= y1; yC += celdaH + 1){
+      carve(xcl, yC, celdaW, celdaH);
+      setT(cx - nw2 - 1, yC + Math.floor(celdaH / 2), T.PUERTA);
+      addMob(xcl + 1, yC + 1, 'cama');
+      addEtq(xcl + celdaW / 2, yC + 0.6, nCelda === 1 ? 'Sacristía' : 'Celda ' + (nCelda - 1));
+      if(nCelda === 1){ quitarMobEn(xcl+1, yC+1); addMob(xcl+1, yC+1, 'estanteria'); addMob(xcl+2, yC+2, 'cofre'); }
+      nCelda++;
+    }
+  }
+  if(xcr + celdaW - 1 <= x1){
+    for(let yC = y0 + 7; yC + celdaH <= y1; yC += celdaH + 1){
+      carve(xcr, yC, celdaW, celdaH);
+      setT(cx + nw2 + 1, yC + Math.floor(celdaH / 2), T.PUERTA);
+      addMob(xcr + 2, yC + 1, 'cama');
+      addEtq(xcr + celdaW / 2, yC + 0.6, 'Celda ' + (nCelda - 1));
+      nCelda++;
+    }
+  }
+  // entrada sur
+  setT(cx, y1 + 1, T.PUERTA);
+  murosAuto();
+};
+
+/* 5 · Torre de mago (plantas circulares en fila, unidas por escalera de caracol) */
+GEN.torre = function(rnd){
+  const r = Math.max(4, Math.min(Math.floor((E.rows - 6) / 2), 6));
+  const D = 2 * r + 1;
+  const n = Math.max(2, Math.min(4, Math.floor((E.cols - 3) / (D + 2))));
+  const totalW = n * (D + 2) - 2;
+  const sx = Math.floor((E.cols - totalW) / 2);
+  const cy = Math.floor(E.rows / 2);
+  const nombres = ['Recibidor', 'Biblioteca arcana', 'Laboratorio', 'Aposento del mago'];
+  let prev = null;
+  for(let i = 0; i < n; i++){
+    const cxi = sx + i * (D + 2) + r;
+    carveCirc(cxi, cy, r);
+    addMob(cxi, cy, 'escalera_caracol');
+    if(prev) E.enlaces.push([[prev, cy], [cxi, cy]]);
+    prev = cxi;
+    addEtq(cxi + 0.5, cy - r - 0.6, 'Planta ' + (i + 1) + ' · ' + nombres[i % nombres.length]);
+    const rol = nombres[i % nombres.length];
+    if(rol === 'Recibidor'){
+      addMob(cxi - 2, cy - 2, 'mesa'); addMob(cxi - 3, cy - 2, 'silla');
+      addMob(cxi + 2, cy + 2, 'barril'); addMob(cxi + 3, cy + 1, 'barril');
+    } else if(rol === 'Biblioteca arcana'){
+      let puestas = 0;
+      for(let a = 0; a < 16 && puestas < 6; a++){
+        const ang = (a / 16) * Math.PI * 2;
+        const bx = Math.round(cxi + Math.cos(ang) * (r - 1));
+        const by = Math.round(cy + Math.sin(ang) * (r - 1));
+        if(getT(bx, by) === T.SUELO && !E.mob.some(m => m.x===bx && m.y===by)){
+          addMob(bx, by, 'estanteria'); puestas++;
+        }
+      }
+      addMob(cxi - 2, cy + 2, 'mesa'); addMob(cxi - 2, cy + 3, 'silla');
+    } else if(rol === 'Laboratorio'){
+      addMob(cxi - 2, cy - 2, 'mesa_larga');
+      addMob(cxi + 2, cy - 2, 'circulo_magico');
+      addMob(cxi - 2, cy + 2, 'brasero'); addMob(cxi + 2, cy + 2, 'brasero');
+    } else {
+      addMob(cxi - 2, cy - 2, 'cama'); addMob(cxi + 2, cy - 2, 'cofre');
+      addMob(cxi - 2, cy + 2, 'chimenea'); addMob(cxi + 2, cy + 2, 'estanteria');
+    }
+  }
+  // puerta de entrada en la planta 1
+  setT(sx + r, cy + r + 1, T.PUERTA);
+  if(getT(sx + r, cy + r) !== T.SUELO) setT(sx + r, cy + r, T.SUELO);
+  murosAuto();
+};
+
+/* 6 · Almacén / sótano de contrabandistas */
+GEN.almacen = function(rnd){
+  const x0 = 2, y0 = 2, x1 = E.cols - 3, y1 = E.rows - 3;
+  carve(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+  // oficina (esquina superior izquierda)
+  const ow = 6, oh = 5;
+  for(let y = y0; y <= y0 + oh; y++) setT(x0 + ow, y, T.MURO);
+  for(let x = x0; x <= x0 + ow; x++) setT(x, y0 + oh, T.MURO);
+  setT(x0 + Math.floor(ow / 2), y0 + oh, T.PUERTA);
+  addMob(x0 + 1, y0 + 1, 'mesa'); addMob(x0 + 2, y0 + 1, 'silla'); addMob(x0 + 1, y0 + 3, 'cofre');
+  addEtq(x0 + ow / 2, y0 + 0.6, 'Oficina');
+  // escondite secreto (esquina inferior derecha)
+  const hw = 6, hh = 4;
+  for(let y = y1 - hh; y <= y1; y++) setT(x1 - hw, y, T.MURO);
+  for(let x = x1 - hw; x <= x1; x++) setT(x, y1 - hh, T.MURO);
+  setT(x1 - hw, y1 - 1, T.SECRETA);
+  addMob(x1 - 1, y1, 'trampilla');
+  addMob(x1 - 2, y1 - 1, 'cofre'); addMob(x1 - 1, y1 - 2, 'cofre');
+  addMob(x1 - hw + 2, y1, 'circulo_magico');
+  addEtq(x1 - hw / 2 - 0.5, y1 - hh + 0.6, 'Escondite');
+  // filas de estanterías
+  for(let x = x0 + ow + 3; x <= x1 - hw - 3; x += 3)
+    for(let y = y0 + 2; y <= y1 - 2; y++){
+      if((y - y0) % 6 >= 4) continue;            // huecos de paso
+      if(getT(x, y) === T.SUELO) addMob(x, y, 'estanteria');
+    }
+  // barriles y cajas
+  for(let k = 0; k < 8; k++){
+    const x = ri(rnd, x0 + 1, x1 - 1), y = ri(rnd, y0 + oh + 2, y1 - hh - 2);
+    if(getT(x, y) === T.SUELO && !E.mob.some(m => m.x===x && m.y===y))
+      addMob(x, y, rnd() < 0.5 ? 'barril' : 'caja');
+  }
+  addEtq((x0 + x1) / 2, y0 + oh + 1.6, 'Almacén');
+  // entrada doble al sur
+  const ex = Math.floor((x0 + x1) / 2);
+  setT(ex, y1 + 1, T.PUERTA); setT(ex + 1, y1 + 1, T.PUERTA);
+  murosAuto();
+};
+
+/* ───── Generación principal (determinista) ───── */
+function generar(seed, tipo, cols, rows){
+  E.seed = seed; E.tipo = tipo;
+  E.cols = Math.max(20, Math.min(60, cols | 0));
+  E.rows = Math.max(20, Math.min(40, rows | 0));
+  E.tiles = new Array(E.cols * E.rows).fill(T.ROCA);
+  E.mob = []; E.etq = []; E.enlaces = [];
+  const rnd = mulberry32(xmur3(seed + '|' + tipo + '|' + E.cols + 'x' + E.rows)());
+  (GEN[tipo] || GEN.mazmorra)(rnd);
+  murosAuto();
+  asegurarConectividad(rnd);
+}
+
+/* ════════════ ESTÉTICAS (solo presentación) ════════════ */
+const TEMAS = {
+  pergamino: {
+    exterior:'#d6c69e', fondo:'#e9ddbd', suelo:'#f3ead2', suelo2:'#eee3c5',
+    muro:'#6b5439', muroBorde:'#43331f', rejilla:'rgba(90,70,40,0.22)',
+    puerta:'#8a6d3b', secreta:'#8a6d3b', texto:'#43331f', halo:'rgba(243,234,210,0.85)',
+    mobL:'#5d4930', mobF:'rgba(93,73,48,0.16)'
+  },
+  oscuro: {
+    exterior:'#08080a', fondo:'#101014', suelo:'#26262e', suelo2:'#23232a',
+    muro:'#4d4d59', muroBorde:'#15151a', rejilla:'rgba(255,255,255,0.06)',
+    puerta:'#a3853e', secreta:'#a3853e', texto:'#cfc7a6', halo:'rgba(0,0,0,0.8)',
+    mobL:'#b9b29a', mobF:'rgba(185,178,154,0.14)'
+  },
+  plano: {
+    exterior:'#0a2140', fondo:'#103060', suelo:'#15396f', suelo2:'#143768',
+    muro:'#d7e4f7', muroBorde:'#ffffff', rejilla:'rgba(255,255,255,0.13)',
+    puerta:'#ffffff', secreta:'#ffffff', texto:'#eaf2ff', halo:'rgba(16,48,96,0.9)',
+    mobL:'#cfe0f7', mobF:'rgba(207,224,247,0.12)'
+  },
+  impresion: {
+    exterior:'#ffffff', fondo:'#ffffff', suelo:'#ffffff', suelo2:'#f3f3f3',
+    muro:'#1a1a1a', muroBorde:'#000000', rejilla:'rgba(0,0,0,0.3)',
+    puerta:'#1a1a1a', secreta:'#1a1a1a', texto:'#000000', halo:'rgba(255,255,255,0.9)',
+    mobL:'#111111', mobF:'rgba(0,0,0,0.05)'
+  }
+};
+
+/* ───── Mobiliario: catálogo y dibujo ───── */
+const CATALOGO_MOB = [
+  ['mesa','Mesa'], ['mesa_larga','Mesa larga'], ['silla','Silla'], ['cama','Cama'],
+  ['altar','Altar'], ['barril','Barril'], ['cofre','Cofre'], ['columna','Columna'],
+  ['estanteria','Estantería'], ['barra','Barra de taberna'], ['banco','Banco'],
+  ['chimenea','Chimenea'], ['brasero','Brasero'], ['escalera_arriba','Escalera ↑'],
+  ['escalera_abajo','Escalera ↓'], ['escalera_caracol','Escalera de caracol'],
+  ['trampa','Trampa'], ['trampilla','Trampilla'], ['circulo_magico','Círculo mágico'],
+  ['caja','Caja'], ['sarcofago','Sarcófago']
+];
+
+function dibujarMob(c, m, ts, tema){
+  const x = m.x * ts, y = m.y * ts;
+  c.strokeStyle = tema.mobL; c.fillStyle = tema.mobF;
+  c.lineWidth = Math.max(1, ts * 0.07);
+  c.lineJoin = 'round';
+  const R = (a,b,w,h) => { c.fillRect(x+a*ts, y+b*ts, w*ts, h*ts); c.strokeRect(x+a*ts, y+b*ts, w*ts, h*ts); };
+  const C = (a,b,r,relleno) => {
+    c.beginPath(); c.arc(x+a*ts, y+b*ts, r*ts, 0, Math.PI*2);
+    if(relleno){ c.fillStyle = tema.mobL; c.fill(); c.fillStyle = tema.mobF; }
+    else { c.fill(); c.stroke(); }
+  };
+  const L = (a,b,d,e) => { c.beginPath(); c.moveTo(x+a*ts, y+b*ts); c.lineTo(x+d*ts, y+e*ts); c.stroke(); };
+  switch(m.t){
+    case 'mesa': C(.5,.5,.32); break;
+    case 'mesa_larga': R(.08,.28,.84,.44); break;
+    case 'silla': R(.3,.3,.4,.4); L(.3,.3,.7,.3); break;
+    case 'cama': R(.12,.08,.76,.84); R(.2,.14,.6,.2); break;
+    case 'altar': R(.15,.3,.7,.45); L(.5,.08,.5,.3); L(.38,.17,.62,.17); break;
+    case 'barril': C(.5,.5,.3); C(.5,.5,.15); break;
+    case 'cofre': R(.18,.28,.64,.46); L(.18,.5,.82,.5); L(.5,.5,.5,.62); break;
+    case 'columna': C(.5,.5,.2,true); break;
+    case 'estanteria': R(.1,.25,.8,.5); L(.32,.25,.32,.75); L(.55,.25,.55,.75); break;
+    case 'barra': R(.04,.2,.92,.6); L(.04,.38,.96,.38); break;
+    case 'banco': R(.1,.36,.8,.28); break;
+    case 'chimenea': R(.08,.12,.84,.76); c.fillStyle = tema.mobL;
+      c.beginPath(); c.moveTo(x+.3*ts,y+.7*ts); c.lineTo(x+.42*ts,y+.4*ts); c.lineTo(x+.52*ts,y+.6*ts);
+      c.lineTo(x+.62*ts,y+.35*ts); c.lineTo(x+.72*ts,y+.7*ts); c.closePath(); c.fill();
+      c.fillStyle = tema.mobF; break;
+    case 'brasero': C(.5,.5,.2);
+      for(let k = 0; k < 4; k++){ const a = Math.PI/4 + k*Math.PI/2;
+        L(.5+Math.cos(a)*.24, .5+Math.sin(a)*.24, .5+Math.cos(a)*.4, .5+Math.sin(a)*.4); }
+      break;
+    case 'escalera_arriba': case 'escalera_abajo': {
+      R(.12,.12,.76,.76);
+      for(let k = 1; k <= 3; k++) L(.12+.19*k,.12,.12+.19*k,.88);
+      const sube = m.t === 'escalera_arriba';
+      c.beginPath();
+      c.moveTo(x+.3*ts, y+(sube?.62:.38)*ts);
+      c.lineTo(x+.5*ts, y+(sube?.38:.62)*ts);
+      c.lineTo(x+.7*ts, y+(sube?.62:.38)*ts);
+      c.stroke(); break;
+    }
+    case 'escalera_caracol': {
+      C(.5,.5,.4);
+      c.beginPath(); c.arc(x+.5*ts, y+.5*ts, .26*ts, 0, Math.PI*1.4); c.stroke();
+      c.beginPath(); c.arc(x+.5*ts, y+.5*ts, .13*ts, Math.PI*.7, Math.PI*2); c.stroke();
+      C(.5,.5,.05,true); break;
+    }
+    case 'trampa':
+      c.beginPath(); c.moveTo(x+.5*ts,y+.15*ts); c.lineTo(x+.85*ts,y+.8*ts); c.lineTo(x+.15*ts,y+.8*ts);
+      c.closePath(); c.fill(); c.stroke();
+      L(.5,.38,.5,.58); C(.5,.7,.035,true); break;
+    case 'trampilla': R(.18,.18,.64,.64); L(.18,.18,.82,.82); C(.62,.5,.08); break;
+    case 'circulo_magico': {
+      C(.5,.5,.42);
+      c.beginPath();
+      for(let k = 0; k <= 5; k++){
+        const a = -Math.PI/2 + k * 4 * Math.PI / 5;
+        const px = x + (.5 + Math.cos(a)*.38) * ts, py = y + (.5 + Math.sin(a)*.38) * ts;
+        k ? c.lineTo(px, py) : c.moveTo(px, py);
+      }
+      c.stroke(); break;
+    }
+    case 'caja': R(.2,.2,.6,.6); L(.2,.2,.8,.8); L(.8,.2,.2,.8); break;
+    case 'sarcofago': R(.2,.08,.6,.84); R(.3,.2,.4,.5); break;
+    default: C(.5,.5,.25);
+  }
+}
+
+/* ───── Renderizado del mapa (compartido pantalla / exportación) ───── */
+function render(c, ts, tema, conRejilla){
+  c.fillStyle = tema.fondo;
+  c.fillRect(0, 0, E.cols * ts, E.rows * ts);
+  // suelo
+  for(let y = 0; y < E.rows; y++)
+    for(let x = 0; x < E.cols; x++){
+      const t = E.tiles[idx(x,y)];
+      if(!esPiso(t)) continue;
+      c.fillStyle = ((x + y) % 2) ? tema.suelo2 : tema.suelo;
+      c.fillRect(x*ts, y*ts, ts, ts);
+    }
+  // rejilla (solo sobre el suelo)
+  if(conRejilla){
+    c.strokeStyle = tema.rejilla; c.lineWidth = Math.max(0.5, ts * 0.025);
+    c.beginPath();
+    for(let y = 0; y < E.rows; y++)
+      for(let x = 0; x < E.cols; x++){
+        if(!esPiso(E.tiles[idx(x,y)])) continue;
+        c.moveTo(x*ts, y*ts); c.lineTo(x*ts+ts, y*ts);
+        c.moveTo(x*ts, y*ts); c.lineTo(x*ts, y*ts+ts);
+      }
+    c.stroke();
+  }
+  // muros
+  for(let y = 0; y < E.rows; y++)
+    for(let x = 0; x < E.cols; x++){
+      const t = E.tiles[idx(x,y)];
+      if(t !== T.MURO) continue;
+      c.fillStyle = tema.muro;
+      c.fillRect(x*ts, y*ts, ts, ts);
+      c.strokeStyle = tema.muroBorde; c.lineWidth = Math.max(1, ts * 0.06);
+      c.strokeRect(x*ts + ts*0.08, y*ts + ts*0.08, ts*0.84, ts*0.84);
+    }
+  // puertas (normales y secretas)
+  for(let y = 0; y < E.rows; y++)
+    for(let x = 0; x < E.cols; x++){
+      const t = E.tiles[idx(x,y)];
+      if(t !== T.PUERTA && t !== T.SECRETA) continue;
+      const horiz = esPiso(getT(x-1,y)) && esPiso(getT(x+1,y));
+      c.fillStyle = tema.puerta;
+      c.strokeStyle = tema.muroBorde; c.lineWidth = Math.max(1, ts*0.05);
+      if(t === T.SECRETA){
+        c.save();
+        c.setLineDash([ts*0.15, ts*0.12]);
+        c.strokeStyle = tema.secreta; c.lineWidth = Math.max(1.5, ts*0.1);
+        if(horiz) c.strokeRect(x*ts+ts*0.32, y*ts+ts*0.1, ts*0.36, ts*0.8);
+        else      c.strokeRect(x*ts+ts*0.1, y*ts+ts*0.32, ts*0.8, ts*0.36);
+        c.font = (ts*0.5) + 'px Georgia, serif';
+        c.textAlign = 'center'; c.textBaseline = 'middle';
+        c.fillText('S', x*ts+ts/2, y*ts+ts/2);
+        c.restore();
+      } else if(horiz){
+        c.fillRect(x*ts+ts*0.1, y*ts+ts*0.34, ts*0.8, ts*0.32);
+        c.strokeRect(x*ts+ts*0.1, y*ts+ts*0.34, ts*0.8, ts*0.32);
+      } else {
+        c.fillRect(x*ts+ts*0.34, y*ts+ts*0.1, ts*0.32, ts*0.8);
+        c.strokeRect(x*ts+ts*0.34, y*ts+ts*0.1, ts*0.32, ts*0.8);
+      }
+    }
+  // mobiliario
+  for(const m of E.mob) dibujarMob(c, m, ts, tema);
+  // etiquetas
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = 'italic ' + Math.max(8, ts * 0.52) + 'px Georgia, serif';
+  for(const e of E.etq){
+    const px = e.x * ts, py = e.y * ts;
+    c.strokeStyle = tema.halo; c.lineWidth = Math.max(2, ts * 0.14);
+    c.strokeText(e.texto, px, py);
+    c.fillStyle = tema.texto;
+    c.fillText(e.texto, px, py);
+  }
+}
+
+/* ════════════ VISTA: lienzo, zoom y desplazamiento ════════════ */
+const lienzo = document.getElementById('lienzo');
+const ctx = lienzo.getContext('2d');
+const TS = 26;
+const vista = { zoom: 1, ox: 0, oy: 0 };
+
+function redimensionar(){
+  const dpr = window.devicePixelRatio || 1;
+  lienzo.width = lienzo.clientWidth * dpr;
+  lienzo.height = lienzo.clientHeight * dpr;
+  dibujar();
+}
+function encajarVista(){
+  const w = lienzo.clientWidth, h = lienzo.clientHeight;
+  if(w < 10 || h < 10){
+    // el lienzo aún no tiene tamaño (primer render): reintentar
+    requestAnimationFrame(() => { redimensionar(); encajarVista(); dibujar(); });
+    return;
+  }
+  vista.zoom = Math.min(w / (E.cols * TS), h / (E.rows * TS)) * 0.92;
+  vista.ox = (w - E.cols * TS * vista.zoom) / 2;
+  vista.oy = (h - E.rows * TS * vista.zoom) / 2;
+}
+function dibujar(){
+  const dpr = window.devicePixelRatio || 1;
+  const tema = TEMAS[E.estetica] || TEMAS.pergamino;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = tema.exterior;
+  ctx.fillRect(0, 0, lienzo.clientWidth, lienzo.clientHeight);
+  ctx.setTransform(dpr * vista.zoom, 0, 0, dpr * vista.zoom, dpr * vista.ox, dpr * vista.oy);
+  render(ctx, TS, tema, document.getElementById('in-rejilla').checked);
+}
+function pantallaACasilla(mx, my){
+  return [
+    Math.floor((mx - vista.ox) / (TS * vista.zoom)),
+    Math.floor((my - vista.oy) / (TS * vista.zoom))
+  ];
+}
+function pantallaAMapa(mx, my){
+  return [(mx - vista.ox) / (TS * vista.zoom), (my - vista.oy) / (TS * vista.zoom)];
+}
+
+/* ════════════ DESHACER / REHACER ════════════ */
+const pilaDeshacer = [], pilaRehacer = [];
+const LIMITE_UNDO = 30;
+function instantanea(){ return JSON.stringify({ tiles: E.tiles, mob: E.mob, etq: E.etq }); }
+function apuntarUndo(){
+  pilaDeshacer.push(instantanea());
+  if(pilaDeshacer.length > LIMITE_UNDO) pilaDeshacer.shift();
+  pilaRehacer.length = 0;
+}
+function restaurar(json){
+  const s = JSON.parse(json);
+  E.tiles = s.tiles; E.mob = s.mob; E.etq = s.etq;
+  dibujar(); guardarLocal();
+}
+function deshacer(){
+  if(!pilaDeshacer.length) return;
+  pilaRehacer.push(instantanea());
+  restaurar(pilaDeshacer.pop());
+}
+function rehacer(){
+  if(!pilaRehacer.length) return;
+  pilaDeshacer.push(instantanea());
+  restaurar(pilaRehacer.pop());
+}
+
+/* ════════════ PERSISTENCIA ════════════ */
+const CLAVE_LS = 'generador_interiores_v1';
+let temporizadorGuardar = null;
+function guardarLocal(){
+  clearTimeout(temporizadorGuardar);
+  temporizadorGuardar = setTimeout(() => {
+    try{
+      localStorage.setItem(CLAVE_LS, JSON.stringify({
+        seed: E.seed, tipo: E.tipo, cols: E.cols, rows: E.rows, estetica: E.estetica,
+        tiles: E.tiles, mob: E.mob, etq: E.etq, enlaces: E.enlaces
+      }));
+      document.getElementById('estado-guardado').textContent =
+        'Guardado en este navegador · ' + new Date().toLocaleTimeString();
+    }catch(err){ /* almacenamiento lleno o bloqueado: se ignora */ }
+  }, 300);
+}
+function actualizarURL(){
+  try{
+    const q = '?seed=' + encodeURIComponent(E.seed) + '&tipo=' + E.tipo +
+              '&ancho=' + E.cols + '&alto=' + E.rows + '&estetica=' + E.estetica;
+    history.replaceState(null, '', location.pathname + q);
+  }catch(err){ /* file:// en algunos navegadores no lo permite */ }
+}
+function semillaAleatoria(){
+  const adj = ['sombrio','antiguo','perdido','maldito','dorado','rojo','oculto','gris','salvaje','runico'];
+  const nom = ['dragon','cuervo','grifo','sello','trono','abismo','roble','yelmo','caliz','espectro'];
+  return nom[Math.floor(Math.random()*nom.length)] + '-' +
+         adj[Math.floor(Math.random()*adj.length)] + '-' +
+         Math.floor(Math.random()*1000);
+}
+
+/* ════════════ INTERFAZ ════════════ */
+const $ = id => document.getElementById(id);
+let herramienta = 'mano';
+let arrastre = null;   // {modo:'pan'|'pintar'|'etiqueta', ...}
+
+function aviso(txt){
+  const el = $('aviso');
+  el.textContent = txt; el.style.opacity = 1;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.style.opacity = 0, 1800);
+}
+function sincronizarPanel(){
+  $('in-seed').value = E.seed;
+  $('in-tipo').value = E.tipo;
+  $('in-ancho').value = E.cols;
+  $('in-alto').value = E.rows;
+  $('in-estetica').value = E.estetica;
+}
+function generarDesdePanel(){
+  const seed = $('in-seed').value.trim() || semillaAleatoria();
+  pilaDeshacer.length = 0; pilaRehacer.length = 0;
+  generar(seed, $('in-tipo').value, +$('in-ancho').value, +$('in-alto').value);
+  sincronizarPanel(); actualizarURL(); encajarVista(); dibujar(); guardarLocal();
+}
+
+$('bt-generar').addEventListener('click', generarDesdePanel);
+$('bt-azar').addEventListener('click', () => { $('in-seed').value = semillaAleatoria(); generarDesdePanel(); });
+$('in-estetica').addEventListener('change', () => {
+  E.estetica = $('in-estetica').value;
+  actualizarURL(); dibujar(); guardarLocal();
+});
+$('in-rejilla').addEventListener('change', dibujar);
+$('bt-deshacer').addEventListener('click', deshacer);
+$('bt-rehacer').addEventListener('click', rehacer);
+$('bt-enlace').addEventListener('click', () => {
+  actualizarURL();
+  const url = location.href;
+  if(navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(url).then(() => aviso('Enlace copiado'), () => aviso(url));
+  else aviso(url);
+});
+
+document.addEventListener('keydown', e => {
+  if(e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'){ e.preventDefault(); e.shiftKey ? rehacer() : deshacer(); }
+  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y'){ e.preventDefault(); rehacer(); }
+});
+
+/* herramientas */
+document.querySelectorAll('#herr button').forEach(b => {
+  b.addEventListener('click', () => {
+    herramienta = b.dataset.herr;
+    document.querySelectorAll('#herr button').forEach(x => x.classList.toggle('activa', x === b));
+    $('caja-mob').style.display = herramienta === 'mobiliario' ? 'block' : 'none';
+    lienzo.classList.toggle('pintando', herramienta !== 'mano');
+  });
+});
+CATALOGO_MOB.forEach(([v, n]) => {
+  const o = document.createElement('option');
+  o.value = v; o.textContent = n;
+  $('in-mob').appendChild(o);
+});
+
+function aplicarHerr(x, y){
+  if(!dentro(x, y)) return;
+  const t = getT(x, y);
+  switch(herramienta){
+    case 'suelo':
+      if(t !== T.SUELO){ setT(x, y, T.SUELO); }
+      break;
+    case 'muro':
+      if(t !== T.MURO){ setT(x, y, T.MURO); quitarMobEn(x, y); }
+      break;
+    case 'puerta':
+      if(t === T.PUERTA) setT(x, y, T.SUELO);
+      else { setT(x, y, T.PUERTA); quitarMobEn(x, y); }
+      break;
+    case 'mobiliario':
+      if(esPiso(t)){ quitarMobEn(x, y); E.mob.push({ x, y, t: $('in-mob').value }); }
+      break;
+    case 'borrar': {
+      const habiaMob = E.mob.some(m => m.x === x && m.y === y);
+      if(habiaMob){ quitarMobEn(x, y); break; }
+      const cerca = E.etq.findIndex(e => Math.abs(e.x - x - 0.5) < 1.5 && Math.abs(e.y - y - 0.5) < 1);
+      if(cerca >= 0){ E.etq.splice(cerca, 1); break; }
+      if(t !== T.ROCA) setT(x, y, T.ROCA);
+      break;
+    }
+  }
+  dibujar(); guardarLocal();
+}
+
+function etiquetaCercana(mx, my){
+  const [fx, fy] = pantallaAMapa(mx, my);
+  let mejor = -1, md = 2.2;
+  E.etq.forEach((e, i) => {
+    const d = Math.hypot(e.x - fx, e.y - fy);
+    if(d < md){ md = d; mejor = i; }
+  });
+  return mejor;
+}
+
+lienzo.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  lienzo.setPointerCapture(e.pointerId);
+  const r = lienzo.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const pan = e.button === 1 || e.button === 2 || herramienta === 'mano';
+  if(pan){
+    arrastre = { modo: 'pan', mx, my, ox: vista.ox, oy: vista.oy };
+    lienzo.style.cursor = 'grabbing';
+    return;
+  }
+  if(herramienta === 'etiqueta'){
+    const i = etiquetaCercana(mx, my);
+    if(i >= 0){
+      apuntarUndo();
+      arrastre = { modo: 'etiqueta', i, movida: false };
+    } else {
+      const [fx, fy] = pantallaAMapa(mx, my);
+      const txt = prompt('Texto de la nueva etiqueta:');
+      if(txt && txt.trim()){ apuntarUndo(); addEtq(fx, fy, txt.trim()); dibujar(); guardarLocal(); }
+    }
+    return;
+  }
+  apuntarUndo();
+  const [tx, ty] = pantallaACasilla(mx, my);
+  arrastre = { modo: 'pintar', ult: tx + ',' + ty };
+  aplicarHerr(tx, ty);
+});
+
+lienzo.addEventListener('pointermove', e => {
+  const r = lienzo.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const [tx, ty] = pantallaACasilla(mx, my);
+  $('coords').textContent = dentro(tx, ty)
+    ? 'Casilla ' + tx + ', ' + ty + ' · ' + (tx*5) + '×' + (ty*5) + ' pies · zoom ' + Math.round(vista.zoom*100) + '%'
+    : 'zoom ' + Math.round(vista.zoom*100) + '%';
+  if(!arrastre) return;
+  if(arrastre.modo === 'pan'){
+    vista.ox = arrastre.ox + (mx - arrastre.mx);
+    vista.oy = arrastre.oy + (my - arrastre.my);
+    dibujar();
+  } else if(arrastre.modo === 'pintar'){
+    const clave = tx + ',' + ty;
+    if(clave !== arrastre.ult){
+      arrastre.ult = clave;
+      if(herramienta === 'suelo' || herramienta === 'muro' || herramienta === 'borrar') aplicarHerr(tx, ty);
+    }
+  } else if(arrastre.modo === 'etiqueta'){
+    const [fx, fy] = pantallaAMapa(mx, my);
+    E.etq[arrastre.i].x = fx; E.etq[arrastre.i].y = fy;
+    arrastre.movida = true;
+    dibujar();
+  }
+});
+
+lienzo.addEventListener('pointerup', e => {
+  if(!arrastre) return;
+  if(arrastre.modo === 'pan') lienzo.style.cursor = herramienta === 'mano' ? 'grab' : 'crosshair';
+  if(arrastre.modo === 'pintar' && (herramienta === 'suelo' || herramienta === 'muro')){
+    murosAuto();           // envolver el suelo nuevo con muros
+    dibujar(); guardarLocal();
+  }
+  if(arrastre.modo === 'etiqueta' && !arrastre.movida){
+    const et = E.etq[arrastre.i];
+    const txt = prompt('Editar etiqueta (vacío para borrar):', et.texto);
+    if(txt !== null){
+      if(txt.trim()) et.texto = txt.trim();
+      else E.etq.splice(arrastre.i, 1);
+      dibujar();
+    }
+  }
+  if(arrastre.modo === 'etiqueta') guardarLocal();
+  arrastre = null;
+});
+lienzo.addEventListener('contextmenu', e => e.preventDefault());
+lienzo.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = lienzo.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  const nuevo = Math.max(0.15, Math.min(8, vista.zoom * factor));
+  vista.ox = mx - (mx - vista.ox) * (nuevo / vista.zoom);
+  vista.oy = my - (my - vista.oy) * (nuevo / vista.zoom);
+  vista.zoom = nuevo;
+  dibujar();
+}, { passive: false });
+
+/* ════════════ EXPORTACIÓN ════════════ */
+$('bt-png').addEventListener('click', () => {
+  const tema = TEMAS[E.estetica];
+  const ts = 52, margen = ts;                       // ≥2× la resolución de pantalla
+  const cv = document.createElement('canvas');
+  cv.width = E.cols * ts + margen * 2;
+  cv.height = E.rows * ts + margen * 2;
+  const c = cv.getContext('2d');
+  c.fillStyle = tema.exterior;
+  c.fillRect(0, 0, cv.width, cv.height);
+  c.translate(margen, margen);
+  render(c, ts, tema, $('in-rejilla-png').checked);
+  const a = document.createElement('a');
+  a.download = 'mapa_' + E.tipo + '_' + E.seed.replace(/[^\w-]/g, '_') + '.png';
+  a.href = cv.toDataURL('image/png');
+  a.click();
+  aviso('PNG descargado');
+});
+
+$('bt-exp-json').addEventListener('click', () => {
+  const datos = JSON.stringify({
+    version: 1, seed: E.seed, tipo: E.tipo, cols: E.cols, rows: E.rows,
+    estetica: E.estetica, tiles: E.tiles, mob: E.mob, etq: E.etq, enlaces: E.enlaces
+  });
+  const a = document.createElement('a');
+  a.download = 'mapa_' + E.tipo + '_' + E.seed.replace(/[^\w-]/g, '_') + '.json';
+  a.href = URL.createObjectURL(new Blob([datos], { type: 'application/json' }));
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  aviso('JSON exportado');
+});
+
+$('bt-imp-json').addEventListener('click', () => $('in-archivo').click());
+$('in-archivo').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  const lector = new FileReader();
+  lector.onload = () => {
+    try{
+      const d = JSON.parse(lector.result);
+      if(!d.tiles || !d.cols || !d.rows) throw new Error('formato');
+      pilaDeshacer.length = 0; pilaRehacer.length = 0;
+      E.seed = d.seed || 'importado'; E.tipo = d.tipo || 'mazmorra';
+      E.cols = d.cols; E.rows = d.rows; E.estetica = d.estetica || E.estetica;
+      E.tiles = d.tiles; E.mob = d.mob || []; E.etq = d.etq || []; E.enlaces = d.enlaces || [];
+      sincronizarPanel(); actualizarURL(); encajarVista(); dibujar(); guardarLocal();
+      aviso('Mapa importado');
+    }catch(err){ aviso('Archivo no válido'); }
+  };
+  lector.readAsText(f);
+  e.target.value = '';
+});
+
+/* ════════════ ARRANQUE ════════════ */
+function arrancar(){
+  const q = new URLSearchParams(location.search);
+  const pSeed = q.get('seed'), pTipo = q.get('tipo');
+  const pAncho = parseInt(q.get('ancho'), 10), pAlto = parseInt(q.get('alto'), 10);
+  const pEst = q.get('estetica');
+  let guardado = null;
+  try{ guardado = JSON.parse(localStorage.getItem(CLAVE_LS)); }catch(err){ guardado = null; }
+
+  const coincide = guardado && (!pSeed || (
+    guardado.seed === pSeed && guardado.tipo === (pTipo || guardado.tipo) &&
+    (!pAncho || guardado.cols === pAncho) && (!pAlto || guardado.rows === pAlto)
+  ));
+
+  if(coincide){
+    E.seed = guardado.seed; E.tipo = guardado.tipo;
+    E.cols = guardado.cols; E.rows = guardado.rows;
+    E.estetica = pEst && TEMAS[pEst] ? pEst : (guardado.estetica || 'pergamino');
+    E.tiles = guardado.tiles; E.mob = guardado.mob || [];
+    E.etq = guardado.etq || []; E.enlaces = guardado.enlaces || [];
+  } else {
+    if(pEst && TEMAS[pEst]) E.estetica = pEst;
+    generar(pSeed || semillaAleatoria(), pTipo && GEN[pTipo] ? pTipo : 'mazmorra',
+            pAncho || 40, pAlto || 30);
+  }
+  sincronizarPanel(); actualizarURL();
+  redimensionar(); encajarVista(); dibujar(); guardarLocal();
+}
+window.addEventListener('resize', redimensionar);
+arrancar();
+</script>
+</body>
+</html>
