@@ -144,12 +144,12 @@
   </fieldset>
 
   <fieldset>
-    <legend>Estética</legend>
+    <legend>Estilo de dibujo</legend>
     <select id="in-estetica">
-      <option value="pergamino">Pergamino y tinta</option>
+      <option value="color">Ilustrado a color</option>
+      <option value="pergamino">Pergamino envejecido</option>
+      <option value="tinta">Tinta (imprimible)</option>
       <option value="oscuro">Mazmorra oscura</option>
-      <option value="plano">Plano técnico (blueprint)</option>
-      <option value="impresion">Impresión limpia (B/N)</option>
     </select>
     <div class="check" style="margin-top:8px">
       <input type="checkbox" id="in-rejilla" checked>
@@ -248,7 +248,7 @@ const esPiso = t => t === T.SUELO || t === T.PUERTA || t === T.SECRETA;
 
 /* ───── Estado global del mapa ───── */
 const E = {
-  seed: '', tipo: 'mazmorra', cols: 40, rows: 30, estetica: 'pergamino',
+  seed: '', tipo: 'mazmorra', cols: 40, rows: 30, estetica: 'color',
   tiles: [], mob: [], etq: [], enlaces: []   // enlaces: pares de casillas unidas por escaleras (torre)
 };
 
@@ -299,6 +299,16 @@ function addMob(x, y, t){
   if(!dentro(x, y) || !esPiso(getT(x, y))) return;
   if(E.mob.some(m => m.x === x && m.y === y)) return;
   E.mob.push({ x, y, t });
+}
+/* alfombras: van por debajo del mobiliario, así que solo evitan duplicarse entre sí */
+function addAlfombra(x, y){
+  if(!dentro(x, y) || !esPiso(getT(x, y))) return;
+  if(E.mob.some(m => m.x === x && m.y === y && m.t === 'alfombra')) return;
+  E.mob.push({ x, y, t: 'alfombra' });
+}
+function alfombraRect(x, y, w, h){
+  for(let j = y; j < y + h; j++)
+    for(let i = x; i < x + w; i++) addAlfombra(i, j);
 }
 function addEtq(x, y, texto){ E.etq.push({ x, y, texto }); }
 function quitarMobEn(x, y){ E.mob = E.mob.filter(m => !(m.x === x && m.y === y)); }
@@ -481,7 +491,9 @@ GEN.mazmorra = function(rnd){
       case 'Osario': addMob(s.x+1, cy, 'caja'); addMob(s.x+s.w-2, cy, 'caja'); break;
       case 'Sala de guardia': addMob(cx, cy, 'mesa'); addMob(cx+1, cy, 'silla'); addMob(s.x+1, s.y+1, 'estanteria'); break;
       case 'Despensa olvidada': case 'Celdas': addMob(s.x+1, s.y+1, 'barril'); addMob(s.x+1, s.y+2, 'barril'); break;
-      case 'Sala del trono': addMob(cx, s.y+1, 'altar'); addMob(s.x+1, cy, 'columna'); addMob(s.x+s.w-2, cy, 'columna'); break;
+      case 'Sala del trono':
+        alfombraRect(cx, s.y+2, 1, s.h-3);
+        addMob(cx, s.y+1, 'altar'); addMob(s.x+1, cy, 'columna'); addMob(s.x+s.w-2, cy, 'columna'); break;
       case 'Santuario profanado': case 'Pozo ritual': addMob(cx, cy, 'altar'); addMob(cx-2, cy, 'brasero'); addMob(cx+2, cy, 'brasero'); break;
       case 'Armería': addMob(s.x+1, s.y+1, 'estanteria'); addMob(s.x+1, s.y+3, 'estanteria'); break;
       case 'Tesorería': addMob(cx, cy, 'cofre'); addMob(cx+1, cy+1, 'cofre'); break;
@@ -576,8 +588,8 @@ GEN.casa = function(rnd){
     const [cx, cy] = centro(s);
     addEtq(s.x + s.w / 2, s.y + 0.7, rol);
     switch(rol){
-      case 'Salón': addMob(s.x + 1, cy, 'chimenea'); addMob(cx, cy, 'mesa'); addMob(cx+1, cy, 'silla'); addMob(cx-1, cy, 'silla'); break;
-      case 'Comedor': addMob(cx, cy, 'mesa_larga'); addMob(cx, cy-1, 'silla'); addMob(cx, cy+1, 'silla'); addMob(cx-1, cy, 'silla'); addMob(cx+1, cy, 'silla'); break;
+      case 'Salón': if(s.w >= 5 && s.h >= 5) alfombraRect(cx-1, cy-1, 3, 3); addMob(s.x + 1, cy, 'chimenea'); addMob(cx, cy, 'mesa'); addMob(cx+1, cy, 'silla'); addMob(cx-1, cy, 'silla'); break;
+      case 'Comedor': if(s.w >= 5 && s.h >= 5) alfombraRect(cx-1, cy-1, 3, 3); addMob(cx, cy, 'mesa_larga'); addMob(cx, cy-1, 'silla'); addMob(cx, cy+1, 'silla'); addMob(cx-1, cy, 'silla'); addMob(cx+1, cy, 'silla'); break;
       case 'Cocina': addMob(s.x+1, s.y+1, 'chimenea'); addMob(cx, cy, 'mesa_larga'); addMob(s.x+s.w-2, s.y+1, 'barril'); break;
       case 'Dormitorio principal': case 'Dormitorio': addMob(s.x+1, s.y+1, 'cama'); addMob(s.x+s.w-2, s.y+s.h-2, 'cofre'); break;
       case 'Estudio': addMob(cx, cy, 'mesa'); addMob(cx+1, cy, 'silla'); addMob(s.x+1, s.y+1, 'estanteria'); break;
@@ -597,6 +609,7 @@ GEN.templo = function(rnd){
   // nave central + presbiterio
   carve(cx - nw2, y0 + 1, nw2 * 2 + 1, y1 - y0 - 1);
   carve(cx - nw2 - 2, y0, nw2 * 2 + 5, 5);
+  alfombraRect(cx, y0 + 3, 1, y1 - y0 - 3);   // pasillo alfombrado de la nave
   addMob(cx, y0 + 1, 'altar');
   addMob(cx - nw2 - 1, y0 + 1, 'brasero');
   addMob(cx + nw2 + 1, y0 + 1, 'brasero');
@@ -739,33 +752,90 @@ function generar(seed, tipo, cols, rows){
   asegurarConectividad(rnd);
 }
 
-/* ════════════ ESTÉTICAS (solo presentación) ════════════ */
-const TEMAS = {
+/* ════════════ ESTILOS DE DIBUJO (solo presentación) ════════════
+   Todo se dibuja como ilustración vectorial a color; cada estilo
+   transforma la paleta (sepia, tinta, oscuro) sin tocar el mapa.  */
+const ESTILOS = {
+  color: {
+    nombre: 'Ilustrado a color', modo: 'color', sombras: true, texturas: true,
+    fondo: '#cfc5ab', rejilla: 'rgba(60,40,20,0.13)',
+    texto: '#3a2a18', halo: 'rgba(240,232,210,0.85)'
+  },
   pergamino: {
-    exterior:'#d6c69e', fondo:'#e9ddbd', suelo:'#f3ead2', suelo2:'#eee3c5',
-    muro:'#6b5439', muroBorde:'#43331f', rejilla:'rgba(90,70,40,0.22)',
-    puerta:'#8a6d3b', secreta:'#8a6d3b', texto:'#43331f', halo:'rgba(243,234,210,0.85)',
-    mobL:'#5d4930', mobF:'rgba(93,73,48,0.16)'
+    nombre: 'Pergamino envejecido', modo: 'sepia', sombras: true, texturas: true,
+    fondo: '#ddd0aa', rejilla: 'rgba(90,70,40,0.16)',
+    texto: '#4a3520', halo: 'rgba(238,227,196,0.9)'
+  },
+  tinta: {
+    nombre: 'Tinta (imprimible)', modo: 'tinta', sombras: false, texturas: true,
+    fondo: '#f4efe2', rejilla: 'rgba(40,30,20,0.2)',
+    texto: '#241c12', halo: 'rgba(244,239,226,0.9)'
   },
   oscuro: {
-    exterior:'#08080a', fondo:'#101014', suelo:'#26262e', suelo2:'#23232a',
-    muro:'#4d4d59', muroBorde:'#15151a', rejilla:'rgba(255,255,255,0.06)',
-    puerta:'#a3853e', secreta:'#a3853e', texto:'#cfc7a6', halo:'rgba(0,0,0,0.8)',
-    mobL:'#b9b29a', mobF:'rgba(185,178,154,0.14)'
-  },
-  plano: {
-    exterior:'#0a2140', fondo:'#103060', suelo:'#15396f', suelo2:'#143768',
-    muro:'#d7e4f7', muroBorde:'#ffffff', rejilla:'rgba(255,255,255,0.13)',
-    puerta:'#ffffff', secreta:'#ffffff', texto:'#eaf2ff', halo:'rgba(16,48,96,0.9)',
-    mobL:'#cfe0f7', mobF:'rgba(207,224,247,0.12)'
-  },
-  impresion: {
-    exterior:'#ffffff', fondo:'#ffffff', suelo:'#ffffff', suelo2:'#f3f3f3',
-    muro:'#1a1a1a', muroBorde:'#000000', rejilla:'rgba(0,0,0,0.3)',
-    puerta:'#1a1a1a', secreta:'#1a1a1a', texto:'#000000', halo:'rgba(255,255,255,0.9)',
-    mobL:'#111111', mobF:'rgba(0,0,0,0.05)'
+    nombre: 'Mazmorra oscura', modo: 'oscuro', sombras: true, texturas: true,
+    fondo: '#0c0c10', rejilla: 'rgba(255,255,255,0.05)',
+    texto: '#d6cda8', halo: 'rgba(0,0,0,0.75)'
   }
 };
+function normalizarEstetica(e){
+  if(ESTILOS[e]) return e;
+  return { plano: 'color', impresion: 'tinta' }[e] || 'color';
+}
+
+/* motor de color: cada estilo transforma la paleta base */
+let _modo = 'color';
+const _cacheColor = {};
+function _rgb(col){
+  if(col[0] === '#'){
+    const n = parseInt(col.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  const m = col.match(/[\d.]+/g);
+  return [+m[0], +m[1], +m[2]];
+}
+function CF(col){            // color de relleno según el estilo activo
+  const k = _modo + '|f|' + col;
+  if(_cacheColor[k]) return _cacheColor[k];
+  let [r, g, b] = _rgb(col);
+  const l = (0.299*r + 0.587*g + 0.114*b) / 255;
+  if(_modo === 'sepia'){
+    const sr = Math.min(255, 105 + l*150), sg = 84 + l*128, sb = 54 + l*90;
+    r = r*0.3 + sr*0.7; g = g*0.3 + sg*0.7; b = b*0.3 + sb*0.7;
+  } else if(_modo === 'tinta'){
+    const v = 255 - (1 - l) * 75;
+    r = v; g = v - 3; b = v - 11;
+  } else if(_modo === 'oscuro'){
+    r = r*0.5 + 7; g = g*0.5 + 7; b = b*0.56 + 10;
+  }
+  return _cacheColor[k] = 'rgb(' + (r|0) + ',' + (g|0) + ',' + (b|0) + ')';
+}
+function CS(col){            // color de trazo según el estilo activo
+  const k = _modo + '|s|' + col;
+  if(_cacheColor[k]) return _cacheColor[k];
+  let [r, g, b] = _rgb(col);
+  const l = (0.299*r + 0.587*g + 0.114*b) / 255;
+  if(_modo === 'sepia'){
+    const sr = 90 + l*130, sg = 70 + l*110, sb = 45 + l*78;
+    r = r*0.3 + sr*0.7; g = g*0.3 + sg*0.7; b = b*0.3 + sb*0.7;
+  } else if(_modo === 'tinta'){
+    r = 43; g = 33; b = 23;
+  } else if(_modo === 'oscuro'){
+    r *= 0.8; g *= 0.8; b *= 0.85;
+  }
+  return _cacheColor[k] = 'rgb(' + (r|0) + ',' + (g|0) + ',' + (b|0) + ')';
+}
+function sombrear(col, f){   // f>0 aclara, f<0 oscurece (antes de CF/CS)
+  let [r, g, b] = _rgb(col);
+  const aj = c => f >= 0 ? c + (255 - c) * f : c * (1 + f);
+  return 'rgb(' + (aj(r)|0) + ',' + (aj(g)|0) + ',' + (aj(b)|0) + ')';
+}
+function hx(x, y, s){        // hash determinista por casilla (textura estable)
+  let h = (x * 374761393 + y * 668265263 + (s || 0) * 1442695041) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+const PALETA_LIBROS = ['#a03a32','#3a5f8a','#4a7a4a','#b08a3a','#7a4a8a','#9c6b3c'];
+const PALETA_TELA   = ['#a03a32','#3a5f8a','#4a7a4a','#8a5f9a','#b3793a'];
 
 /* ───── Mobiliario: catálogo y dibujo ───── */
 const CATALOGO_MOB = [
@@ -775,93 +845,295 @@ const CATALOGO_MOB = [
   ['chimenea','Chimenea'], ['brasero','Brasero'], ['escalera_arriba','Escalera ↑'],
   ['escalera_abajo','Escalera ↓'], ['escalera_caracol','Escalera de caracol'],
   ['trampa','Trampa'], ['trampilla','Trampilla'], ['circulo_magico','Círculo mágico'],
-  ['caja','Caja'], ['sarcofago','Sarcófago']
+  ['caja','Caja'], ['sarcofago','Sarcófago'], ['alfombra','Alfombra']
 ];
 
-function dibujarMob(c, m, ts, tema){
+function dibujarMob(c, m, ts, estilo){
   const x = m.x * ts, y = m.y * ts;
-  c.strokeStyle = tema.mobL; c.fillStyle = tema.mobF;
-  c.lineWidth = Math.max(1, ts * 0.07);
-  c.lineJoin = 'round';
-  const R = (a,b,w,h) => { c.fillRect(x+a*ts, y+b*ts, w*ts, h*ts); c.strokeRect(x+a*ts, y+b*ts, w*ts, h*ts); };
-  const C = (a,b,r,relleno) => {
-    c.beginPath(); c.arc(x+a*ts, y+b*ts, r*ts, 0, Math.PI*2);
-    if(relleno){ c.fillStyle = tema.mobL; c.fill(); c.fillStyle = tema.mobF; }
-    else { c.fill(); c.stroke(); }
+  c.lineJoin = 'round'; c.lineCap = 'round';
+  const lw = Math.max(1, ts * 0.06);
+  const R = (a,b,w,h,f,s,grosor) => {
+    if(f){ c.fillStyle = CF(f); c.fillRect(x+a*ts, y+b*ts, w*ts, h*ts); }
+    if(s){ c.strokeStyle = CS(s); c.lineWidth = grosor || lw; c.strokeRect(x+a*ts, y+b*ts, w*ts, h*ts); }
   };
-  const L = (a,b,d,e) => { c.beginPath(); c.moveTo(x+a*ts, y+b*ts); c.lineTo(x+d*ts, y+e*ts); c.stroke(); };
+  const C = (a,b,r,f,s,grosor) => {
+    c.beginPath(); c.arc(x+a*ts, y+b*ts, r*ts, 0, Math.PI*2);
+    if(f){ c.fillStyle = CF(f); c.fill(); }
+    if(s){ c.strokeStyle = CS(s); c.lineWidth = grosor || lw; c.stroke(); }
+  };
+  const L = (a,b,d,e,s,grosor) => {
+    c.strokeStyle = CS(s); c.lineWidth = grosor || lw;
+    c.beginPath(); c.moveTo(x+a*ts, y+b*ts); c.lineTo(x+d*ts, y+e*ts); c.stroke();
+  };
+  const P = (puntos,f,s,grosor) => {            // polígono [[a,b],...]
+    c.beginPath();
+    puntos.forEach((p, i) => i ? c.lineTo(x+p[0]*ts, y+p[1]*ts) : c.moveTo(x+p[0]*ts, y+p[1]*ts));
+    c.closePath();
+    if(f){ c.fillStyle = CF(f); c.fill(); }
+    if(s){ c.strokeStyle = CS(s); c.lineWidth = grosor || lw; c.stroke(); }
+  };
+  const h1 = hx(m.x, m.y, 11), h2 = hx(m.x, m.y, 12);
   switch(m.t){
-    case 'mesa': C(.5,.5,.32); break;
-    case 'mesa_larga': R(.08,.28,.84,.44); break;
-    case 'silla': R(.3,.3,.4,.4); L(.3,.3,.7,.3); break;
-    case 'cama': R(.12,.08,.76,.84); R(.2,.14,.6,.2); break;
-    case 'altar': R(.15,.3,.7,.45); L(.5,.08,.5,.3); L(.38,.17,.62,.17); break;
-    case 'barril': C(.5,.5,.3); C(.5,.5,.15); break;
-    case 'cofre': R(.18,.28,.64,.46); L(.18,.5,.82,.5); L(.5,.5,.5,.62); break;
-    case 'columna': C(.5,.5,.2,true); break;
-    case 'estanteria': R(.1,.25,.8,.5); L(.32,.25,.32,.75); L(.55,.25,.55,.75); break;
-    case 'barra': R(.04,.2,.92,.6); L(.04,.38,.96,.38); break;
-    case 'banco': R(.1,.36,.8,.28); break;
-    case 'chimenea': R(.08,.12,.84,.76); c.fillStyle = tema.mobL;
-      c.beginPath(); c.moveTo(x+.3*ts,y+.7*ts); c.lineTo(x+.42*ts,y+.4*ts); c.lineTo(x+.52*ts,y+.6*ts);
-      c.lineTo(x+.62*ts,y+.35*ts); c.lineTo(x+.72*ts,y+.7*ts); c.closePath(); c.fill();
-      c.fillStyle = tema.mobF; break;
-    case 'brasero': C(.5,.5,.2);
-      for(let k = 0; k < 4; k++){ const a = Math.PI/4 + k*Math.PI/2;
-        L(.5+Math.cos(a)*.24, .5+Math.sin(a)*.24, .5+Math.cos(a)*.4, .5+Math.sin(a)*.4); }
+    case 'mesa':
+      C(.5,.5,.36,'#a9743f','#5b3a1c');
+      C(.5,.5,.22,null,'#8a5c30',lw*0.7); C(.5,.5,.1,null,'#8a5c30',lw*0.6);
+      break;
+    case 'mesa_larga':
+      R(.05,.26,.9,.48,'#a9743f','#5b3a1c');
+      L(.05,.5,.95,.5,'#8a5c30',lw*0.7); L(.3,.26,.3,.74,'#8a5c30',lw*0.5); L(.65,.26,.65,.74,'#8a5c30',lw*0.5);
+      break;
+    case 'silla':
+      R(.28,.32,.44,.42,'#b07f48','#5b3a1c');
+      R(.28,.2,.44,.14,'#8a5c30','#5b3a1c');
+      break;
+    case 'cama': {
+      R(.08,.04,.84,.92,'#7a5230','#4a2f14');
+      R(.14,.1,.72,.82,'#ece4d2','#b5a98e');
+      R(.18,.14,.64,.2,'#f7f3e8','#c2b89e');
+      const manta = PALETA_TELA[Math.floor(h1 * PALETA_TELA.length)];
+      R(.14,.42,.72,.5, manta, sombrear(manta,-0.35));
+      L(.14,.56,.86,.56, sombrear(manta,-0.3), lw*0.6);
+      break;
+    }
+    case 'altar':
+      R(.12,.32,.76,.5,'#9c948a','#56504a');
+      R(.2,.26,.6,.3,'#f2eee2','#b8b09c');
+      C(.3,.36,.05,'#e8c34a','#8a6a1e',lw*0.5); C(.7,.36,.05,'#e8c34a','#8a6a1e',lw*0.5);
+      L(.5,.3,.5,.5,'#b08a2e',lw*0.8); L(.42,.37,.58,.37,'#b08a2e',lw*0.8);
+      break;
+    case 'barril':
+      C(.5,.5,.34,'#9c6b3c','#54371c');
+      C(.5,.5,.24,null,'#6e4a26',lw*0.7); C(.5,.5,.12,null,'#6e4a26',lw*0.6);
+      C(.5,.5,.04,'#54371c');
+      break;
+    case 'cofre':
+      R(.14,.3,.72,.46,'#8a5a2e','#4a2f14');
+      L(.14,.46,.86,.46,'#4a2f14',lw*0.7);
+      R(.44,.3,.12,.46,'#d9a93e','#8a6a1e',lw*0.7);
+      C(.5,.56,.05,'#8a6a1e');
+      break;
+    case 'columna':
+      C(.5,.5,.3,'#b5ada0','#56504a');
+      C(.5,.5,.18,'#cac2b4'); C(.42,.42,.06,'#ddd6c8');
+      break;
+    case 'estanteria': {
+      R(.06,.18,.88,.64,'#6e4a26','#3c2812');
+      for(let k = 0; k < 5; k++){
+        const lib = PALETA_LIBROS[Math.floor(hx(m.x, m.y, 20 + k) * PALETA_LIBROS.length)];
+        R(.12 + k*.156,.26,.12,.48, lib, sombrear(lib,-0.35), lw*0.5);
+      }
+      break;
+    }
+    case 'barra':
+      R(.02,.22,.96,.56,'#8a5c30','#4a2f14');
+      L(.02,.34,.98,.34,'#b07f48',lw*0.7);
+      break;
+    case 'banco':
+      R(.08,.36,.84,.28,'#a9743f','#5b3a1c');
+      L(.3,.36,.3,.64,'#8a5c30',lw*0.5); L(.7,.36,.7,.64,'#8a5c30',lw*0.5);
+      break;
+    case 'chimenea':
+      R(.04,.08,.92,.84,'#8d8478','#46403a');
+      R(.2,.32,.6,.54,'#2c211a','#46403a',lw*0.7);
+      L(.28,.82,.72,.78,'#5b3a1c',lw*1.1);
+      P([[.34,.78],[.42,.5],[.5,.68],[.58,.44],[.68,.78]],'#e8902c','#b35f1a',lw*0.5);
+      P([[.42,.78],[.5,.6],[.58,.78]],'#f4c84a');
+      break;
+    case 'brasero':
+      L(.34,.84,.42,.66,'#46403a',lw*0.8); L(.66,.84,.58,.66,'#46403a',lw*0.8);
+      C(.5,.6,.22,'#5a5248','#33302c');
+      P([[.38,.56],[.46,.3],[.52,.46],[.6,.26],[.64,.56]],'#e8902c','#b35f1a',lw*0.5);
+      P([[.45,.56],[.52,.42],[.58,.56]],'#f4c84a');
       break;
     case 'escalera_arriba': case 'escalera_abajo': {
-      R(.12,.12,.76,.76);
-      for(let k = 1; k <= 3; k++) L(.12+.19*k,.12,.12+.19*k,.88);
       const sube = m.t === 'escalera_arriba';
-      c.beginPath();
-      c.moveTo(x+.3*ts, y+(sube?.62:.38)*ts);
-      c.lineTo(x+.5*ts, y+(sube?.38:.62)*ts);
-      c.lineTo(x+.7*ts, y+(sube?.62:.38)*ts);
-      c.stroke(); break;
+      for(let k = 0; k < 5; k++){
+        const f = sube ? (k - 2) * 0.09 : (2 - k) * 0.09;
+        R(.08 + k*.168,.08,.168,.84, sombrear('#b5ada0', f));
+      }
+      R(.08,.08,.84,.84,null,'#46403a');
+      for(let k = 1; k < 5; k++) L(.08+k*.168,.08,.08+k*.168,.92,'#46403a',lw*0.5);
+      P(sube ? [[.3,.62],[.5,.36],[.7,.62]] : [[.3,.38],[.5,.64],[.7,.38]], '#46403a');
+      break;
     }
     case 'escalera_caracol': {
-      C(.5,.5,.4);
-      c.beginPath(); c.arc(x+.5*ts, y+.5*ts, .26*ts, 0, Math.PI*1.4); c.stroke();
-      c.beginPath(); c.arc(x+.5*ts, y+.5*ts, .13*ts, Math.PI*.7, Math.PI*2); c.stroke();
-      C(.5,.5,.05,true); break;
+      C(.5,.5,.42,'#b5ada0','#46403a');
+      for(let k = 0; k < 8; k++){
+        const a = k * Math.PI / 4 + 0.3;
+        L(.5,.5,.5 + Math.cos(a)*.4,.5 + Math.sin(a)*.4,'#46403a',lw*0.5);
+      }
+      c.strokeStyle = CS('#46403a'); c.lineWidth = lw * 0.8;
+      c.beginPath(); c.arc(x+.5*ts, y+.5*ts, .26*ts, 0, Math.PI*1.5); c.stroke();
+      C(.5,.5,.09,'#5a5248','#33302c',lw*0.6);
+      break;
     }
     case 'trampa':
-      c.beginPath(); c.moveTo(x+.5*ts,y+.15*ts); c.lineTo(x+.85*ts,y+.8*ts); c.lineTo(x+.15*ts,y+.8*ts);
-      c.closePath(); c.fill(); c.stroke();
-      L(.5,.38,.5,.58); C(.5,.7,.035,true); break;
-    case 'trampilla': R(.18,.18,.64,.64); L(.18,.18,.82,.82); C(.62,.5,.08); break;
+      R(.18,.18,.64,.64,'#a8a092','#46403a');
+      R(.28,.28,.44,.44,null,'#6e665c',lw*0.6);
+      C(.5,.5,.07,'#a03a32','#5e1f1a',lw*0.5);
+      break;
+    case 'trampilla':
+      R(.14,.14,.72,.72,'#8a5c30','#4a2f14');
+      L(.38,.14,.38,.86,'#6e4a26',lw*0.5); L(.62,.14,.62,.86,'#6e4a26',lw*0.5);
+      C(.5,.46,.1,null,'#3c3c42',lw*0.9);
+      break;
     case 'circulo_magico': {
-      C(.5,.5,.42);
+      if(_modo !== 'tinta'){
+        c.fillStyle = _modo === 'oscuro' ? 'rgba(130,100,230,0.22)' : 'rgba(110,80,200,0.14)';
+        c.beginPath(); c.arc(x+.5*ts, y+.5*ts, .46*ts, 0, Math.PI*2); c.fill();
+      }
+      C(.5,.5,.42,null,'#6a4ab8',lw*0.9); C(.5,.5,.34,null,'#6a4ab8',lw*0.5);
+      c.strokeStyle = CS('#6a4ab8'); c.lineWidth = lw * 0.7;
       c.beginPath();
       for(let k = 0; k <= 5; k++){
         const a = -Math.PI/2 + k * 4 * Math.PI / 5;
-        const px = x + (.5 + Math.cos(a)*.38) * ts, py = y + (.5 + Math.sin(a)*.38) * ts;
+        const px = x + (.5 + Math.cos(a)*.34) * ts, py = y + (.5 + Math.sin(a)*.34) * ts;
         k ? c.lineTo(px, py) : c.moveTo(px, py);
       }
-      c.stroke(); break;
+      c.closePath(); c.stroke();
+      for(let k = 0; k < 5; k++){
+        const a = -Math.PI/2 + k * 2 * Math.PI / 5;
+        C(.5 + Math.cos(a)*.42,.5 + Math.sin(a)*.42,.035,'#d9a93e');
+      }
+      break;
     }
-    case 'caja': R(.2,.2,.6,.6); L(.2,.2,.8,.8); L(.8,.2,.2,.8); break;
-    case 'sarcofago': R(.2,.08,.6,.84); R(.3,.2,.4,.5); break;
-    default: C(.5,.5,.25);
+    case 'caja':
+      R(.16,.16,.68,.68,'#b07f48','#5b3a1c');
+      L(.16,.16,.84,.84,'#8a5c30',lw*0.6); L(.84,.16,.16,.84,'#8a5c30',lw*0.6);
+      R(.16,.16,.68,.68,null,'#5b3a1c');
+      break;
+    case 'sarcofago':
+      R(.16,.05,.68,.9,'#a8a092','#46403a');
+      R(.26,.16,.48,.68,'#bcb4a6','#6e665c',lw*0.6);
+      L(.5,.28,.5,.62,'#6e665c',lw*0.8); L(.4,.38,.6,.38,'#6e665c',lw*0.8);
+      break;
+    default: C(.5,.5,.25,'#a9743f','#5b3a1c');
+  }
+}
+
+/* alfombras: se dibujan bajo el mobiliario y se funden entre casillas vecinas */
+function dibujarAlfombras(c, ts, alf){
+  const lw = Math.max(1, ts * 0.06);
+  for(const clave of alf){
+    const [x, y] = clave.split(',').map(Number);
+    c.fillStyle = CF('#a03a32');
+    c.fillRect(x*ts - 0.3, y*ts - 0.3, ts + 0.6, ts + 0.6);
+  }
+  c.strokeStyle = CS('#6e2620'); c.lineWidth = lw;
+  c.beginPath();
+  for(const clave of alf){
+    const [x, y] = clave.split(',').map(Number);
+    const m = ts * 0.07;
+    if(!alf.has((x-1) + ',' + y)){ c.moveTo(x*ts + m, y*ts); c.lineTo(x*ts + m, y*ts + ts); }
+    if(!alf.has((x+1) + ',' + y)){ c.moveTo(x*ts + ts - m, y*ts); c.lineTo(x*ts + ts - m, y*ts + ts); }
+    if(!alf.has(x + ',' + (y-1))){ c.moveTo(x*ts, y*ts + m); c.lineTo(x*ts + ts, y*ts + m); }
+    if(!alf.has(x + ',' + (y+1))){ c.moveTo(x*ts, y*ts + ts - m); c.lineTo(x*ts + ts, y*ts + ts - m); }
+  }
+  c.stroke();
+  c.strokeStyle = CS('#c8693e'); c.lineWidth = lw * 0.6; c.globalAlpha = 0.7;
+  c.beginPath();
+  for(const clave of alf){
+    const [x, y] = clave.split(',').map(Number);
+    c.moveTo(x*ts + ts*0.5, y*ts + ts*0.3); c.lineTo(x*ts + ts*0.7, y*ts + ts*0.5);
+    c.lineTo(x*ts + ts*0.5, y*ts + ts*0.7); c.lineTo(x*ts + ts*0.3, y*ts + ts*0.5);
+    c.closePath();
+  }
+  c.stroke(); c.globalAlpha = 1;
+}
+
+/* puerta dibujada: hoja de madera con marco */
+function dibujarPuerta(c, x, y, ts, horiz, secreta){
+  const lw = Math.max(1, ts * 0.06);
+  if(secreta){
+    c.save();
+    c.setLineDash([ts*0.14, ts*0.11]);
+    c.strokeStyle = CS('#3c2812'); c.lineWidth = Math.max(1.5, ts*0.09);
+    if(horiz) c.strokeRect(x*ts + ts*0.32, y*ts + ts*0.08, ts*0.36, ts*0.84);
+    else      c.strokeRect(x*ts + ts*0.08, y*ts + ts*0.32, ts*0.84, ts*0.36);
+    c.setLineDash([]);
+    c.font = 'bold ' + (ts*0.5) + 'px Georgia, serif';
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle = CS('#3c2812');
+    c.fillText('S', x*ts + ts/2, y*ts + ts/2);
+    c.restore();
+    return;
+  }
+  c.fillStyle = CF('#8a5c30'); c.strokeStyle = CS('#3c2812'); c.lineWidth = lw;
+  if(horiz){            // paso a izquierda y derecha → la hoja cruza el muro vertical
+    c.fillRect(x*ts + ts*0.3, y*ts + ts*0.06, ts*0.4, ts*0.88);
+    c.strokeRect(x*ts + ts*0.3, y*ts + ts*0.06, ts*0.4, ts*0.88);
+    c.strokeStyle = CS('#6e4a26'); c.lineWidth = lw * 0.5;
+    c.beginPath();
+    c.moveTo(x*ts + ts*0.5, y*ts + ts*0.06); c.lineTo(x*ts + ts*0.5, y*ts + ts*0.94);
+    c.stroke();
+    c.fillStyle = CF('#3c3c42');
+    c.beginPath(); c.arc(x*ts + ts*0.4, y*ts + ts*0.5, ts*0.05, 0, Math.PI*2); c.fill();
+  } else {
+    c.fillRect(x*ts + ts*0.06, y*ts + ts*0.3, ts*0.88, ts*0.4);
+    c.strokeRect(x*ts + ts*0.06, y*ts + ts*0.3, ts*0.88, ts*0.4);
+    c.strokeStyle = CS('#6e4a26'); c.lineWidth = lw * 0.5;
+    c.beginPath();
+    c.moveTo(x*ts + ts*0.06, y*ts + ts*0.5); c.lineTo(x*ts + ts*0.94, y*ts + ts*0.5);
+    c.stroke();
+    c.fillStyle = CF('#3c3c42');
+    c.beginPath(); c.arc(x*ts + ts*0.5, y*ts + ts*0.4, ts*0.05, 0, Math.PI*2); c.fill();
   }
 }
 
 /* ───── Renderizado del mapa (compartido pantalla / exportación) ───── */
-function render(c, ts, tema, conRejilla){
-  c.fillStyle = tema.fondo;
+function render(c, ts, estilo, conRejilla){
+  _modo = estilo.modo;
+  c.fillStyle = estilo.fondo;
   c.fillRect(0, 0, E.cols * ts, E.rows * ts);
-  // suelo
+  const madera = (E.tipo === 'taberna' || E.tipo === 'casa');
+  // suelo: madera o piedra con variación determinista por casilla
+  const baseSuelo = madera ? '#c9a268' : '#b3a999';
+  const varSuelo = [];
+  for(let k = 0; k < 6; k++) varSuelo.push(CF(sombrear(baseSuelo, (k - 2.5) * 0.034)));
   for(let y = 0; y < E.rows; y++)
     for(let x = 0; x < E.cols; x++){
-      const t = E.tiles[idx(x,y)];
-      if(!esPiso(t)) continue;
-      c.fillStyle = ((x + y) % 2) ? tema.suelo2 : tema.suelo;
-      c.fillRect(x*ts, y*ts, ts, ts);
+      if(!esPiso(E.tiles[idx(x,y)])) continue;
+      const v = madera ? hx(0, y, 7) * 0.6 + hx(x, y, 3) * 0.4 : hx(x, y, 3);
+      c.fillStyle = varSuelo[Math.min(5, Math.floor(v * 6))];
+      c.fillRect(x*ts - 0.3, y*ts - 0.3, ts + 0.6, ts + 0.6);
     }
+  // juntas de tablones / losas
+  if(estilo.texturas){
+    c.strokeStyle = CS(madera ? '#8a6a40' : '#857a68');
+    c.lineWidth = Math.max(0.6, ts * 0.035);
+    c.globalAlpha = 0.4;
+    c.beginPath();
+    for(let y = 0; y < E.rows; y++)
+      for(let x = 0; x < E.cols; x++){
+        if(!esPiso(E.tiles[idx(x,y)])) continue;
+        c.moveTo(x*ts, y*ts + ts); c.lineTo(x*ts + ts, y*ts + ts);
+        const junta = madera ? ((x + y * 2) % 4 === 0) : hx(x, y, 4) < 0.5;
+        if(junta){ c.moveTo(x*ts, y*ts); c.lineTo(x*ts, y*ts + ts); }
+      }
+    c.stroke();
+    c.globalAlpha = 1;
+  }
+  // alfombras (bajo el mobiliario)
+  const alf = new Set(E.mob.filter(m => m.t === 'alfombra').map(m => m.x + ',' + m.y));
+  if(alf.size) dibujarAlfombras(c, ts, alf);
+  // sombras proyectadas por los muros (luz desde arriba-izquierda)
+  if(estilo.sombras){
+    c.fillStyle = 'rgba(24,14,4,0.16)';
+    for(let y = 0; y < E.rows; y++)
+      for(let x = 0; x < E.cols; x++){
+        if(!esPiso(E.tiles[idx(x,y)])) continue;
+        if(!esPiso(getT(x, y-1))) c.fillRect(x*ts, y*ts, ts, ts*0.3);
+      }
+    c.fillStyle = 'rgba(24,14,4,0.1)';
+    for(let y = 0; y < E.rows; y++)
+      for(let x = 0; x < E.cols; x++){
+        if(!esPiso(E.tiles[idx(x,y)])) continue;
+        if(!esPiso(getT(x-1, y))) c.fillRect(x*ts, y*ts, ts*0.3, ts);
+      }
+  }
   // rejilla (solo sobre el suelo)
   if(conRejilla){
-    c.strokeStyle = tema.rejilla; c.lineWidth = Math.max(0.5, ts * 0.025);
+    c.strokeStyle = estilo.rejilla; c.lineWidth = Math.max(0.5, ts * 0.025);
     c.beginPath();
     for(let y = 0; y < E.rows; y++)
       for(let x = 0; x < E.cols; x++){
@@ -871,52 +1143,65 @@ function render(c, ts, tema, conRejilla){
       }
     c.stroke();
   }
-  // muros
+  // muros: relleno pétreo con variación + juntas + contorno grueso
+  const varMuro = [];
+  for(let k = 0; k < 4; k++) varMuro.push(CF(sombrear('#76685a', (k - 1.5) * 0.055)));
   for(let y = 0; y < E.rows; y++)
     for(let x = 0; x < E.cols; x++){
-      const t = E.tiles[idx(x,y)];
-      if(t !== T.MURO) continue;
-      c.fillStyle = tema.muro;
-      c.fillRect(x*ts, y*ts, ts, ts);
-      c.strokeStyle = tema.muroBorde; c.lineWidth = Math.max(1, ts * 0.06);
-      c.strokeRect(x*ts + ts*0.08, y*ts + ts*0.08, ts*0.84, ts*0.84);
+      if(E.tiles[idx(x,y)] !== T.MURO) continue;
+      c.fillStyle = varMuro[Math.floor(hx(x, y, 5) * 4)];
+      c.fillRect(x*ts - 0.4, y*ts - 0.4, ts + 0.8, ts + 0.8);
     }
+  if(estilo.texturas){
+    c.lineWidth = Math.max(0.6, ts * 0.04);
+    c.globalAlpha = _modo === 'tinta' ? 0.45 : 0.35;
+    c.strokeStyle = CS('#564a3e');
+    c.beginPath();
+    for(let y = 0; y < E.rows; y++)
+      for(let x = 0; x < E.cols; x++){
+        if(E.tiles[idx(x,y)] !== T.MURO) continue;
+        if(_modo === 'tinta'){           // rayado de grabado
+          c.moveTo(x*ts, y*ts + ts); c.lineTo(x*ts + ts, y*ts);
+          c.moveTo(x*ts, y*ts + ts*0.5); c.lineTo(x*ts + ts*0.5, y*ts);
+        } else {                          // juntas de sillería
+          c.moveTo(x*ts, y*ts + ts); c.lineTo(x*ts + ts, y*ts + ts);
+          if((x + y) % 2 === 0){ c.moveTo(x*ts, y*ts); c.lineTo(x*ts, y*ts + ts); }
+        }
+      }
+    c.stroke();
+    c.globalAlpha = 1;
+  }
+  c.strokeStyle = CS('#2e241b');
+  c.lineWidth = Math.max(1.2, ts * 0.09);
+  c.lineCap = 'square';
+  c.beginPath();
+  for(let y = 0; y < E.rows; y++)
+    for(let x = 0; x < E.cols; x++){
+      if(E.tiles[idx(x,y)] !== T.MURO) continue;
+      if(getT(x, y-1) !== T.MURO){ c.moveTo(x*ts, y*ts); c.lineTo(x*ts + ts, y*ts); }
+      if(getT(x, y+1) !== T.MURO){ c.moveTo(x*ts, y*ts + ts); c.lineTo(x*ts + ts, y*ts + ts); }
+      if(getT(x-1, y) !== T.MURO){ c.moveTo(x*ts, y*ts); c.lineTo(x*ts, y*ts + ts); }
+      if(getT(x+1, y) !== T.MURO){ c.moveTo(x*ts + ts, y*ts); c.lineTo(x*ts + ts, y*ts + ts); }
+    }
+  c.stroke();
   // puertas (normales y secretas)
   for(let y = 0; y < E.rows; y++)
     for(let x = 0; x < E.cols; x++){
       const t = E.tiles[idx(x,y)];
       if(t !== T.PUERTA && t !== T.SECRETA) continue;
       const horiz = esPiso(getT(x-1,y)) && esPiso(getT(x+1,y));
-      c.fillStyle = tema.puerta;
-      c.strokeStyle = tema.muroBorde; c.lineWidth = Math.max(1, ts*0.05);
-      if(t === T.SECRETA){
-        c.save();
-        c.setLineDash([ts*0.15, ts*0.12]);
-        c.strokeStyle = tema.secreta; c.lineWidth = Math.max(1.5, ts*0.1);
-        if(horiz) c.strokeRect(x*ts+ts*0.32, y*ts+ts*0.1, ts*0.36, ts*0.8);
-        else      c.strokeRect(x*ts+ts*0.1, y*ts+ts*0.32, ts*0.8, ts*0.36);
-        c.font = (ts*0.5) + 'px Georgia, serif';
-        c.textAlign = 'center'; c.textBaseline = 'middle';
-        c.fillText('S', x*ts+ts/2, y*ts+ts/2);
-        c.restore();
-      } else if(horiz){
-        c.fillRect(x*ts+ts*0.1, y*ts+ts*0.34, ts*0.8, ts*0.32);
-        c.strokeRect(x*ts+ts*0.1, y*ts+ts*0.34, ts*0.8, ts*0.32);
-      } else {
-        c.fillRect(x*ts+ts*0.34, y*ts+ts*0.1, ts*0.32, ts*0.8);
-        c.strokeRect(x*ts+ts*0.34, y*ts+ts*0.1, ts*0.32, ts*0.8);
-      }
+      dibujarPuerta(c, x, y, ts, horiz, t === T.SECRETA);
     }
-  // mobiliario
-  for(const m of E.mob) dibujarMob(c, m, ts, tema);
+  // mobiliario (las alfombras ya están dibujadas)
+  for(const m of E.mob) if(m.t !== 'alfombra') dibujarMob(c, m, ts, estilo);
   // etiquetas
   c.textAlign = 'center'; c.textBaseline = 'middle';
   c.font = 'italic ' + Math.max(8, ts * 0.52) + 'px Georgia, serif';
   for(const e of E.etq){
     const px = e.x * ts, py = e.y * ts;
-    c.strokeStyle = tema.halo; c.lineWidth = Math.max(2, ts * 0.14);
+    c.strokeStyle = estilo.halo; c.lineWidth = Math.max(2, ts * 0.14);
     c.strokeText(e.texto, px, py);
-    c.fillStyle = tema.texto;
+    c.fillStyle = estilo.texto;
     c.fillText(e.texto, px, py);
   }
 }
@@ -946,12 +1231,12 @@ function encajarVista(){
 }
 function dibujar(){
   const dpr = window.devicePixelRatio || 1;
-  const tema = TEMAS[E.estetica] || TEMAS.pergamino;
+  const estilo = ESTILOS[E.estetica] || ESTILOS.color;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = tema.exterior;
+  ctx.fillStyle = sombrear(estilo.fondo, estilo.modo === 'oscuro' ? -0.3 : -0.09);
   ctx.fillRect(0, 0, lienzo.clientWidth, lienzo.clientHeight);
   ctx.setTransform(dpr * vista.zoom, 0, 0, dpr * vista.zoom, dpr * vista.ox, dpr * vista.oy);
-  render(ctx, TS, tema, document.getElementById('in-rejilla').checked);
+  render(ctx, TS, estilo, document.getElementById('in-rejilla').checked);
 }
 function pantallaACasilla(mx, my){
   return [
@@ -1210,16 +1495,16 @@ lienzo.addEventListener('wheel', e => {
 
 /* ════════════ EXPORTACIÓN ════════════ */
 $('bt-png').addEventListener('click', () => {
-  const tema = TEMAS[E.estetica];
+  const estilo = ESTILOS[E.estetica] || ESTILOS.color;
   const ts = 52, margen = ts;                       // ≥2× la resolución de pantalla
   const cv = document.createElement('canvas');
   cv.width = E.cols * ts + margen * 2;
   cv.height = E.rows * ts + margen * 2;
   const c = cv.getContext('2d');
-  c.fillStyle = tema.exterior;
+  c.fillStyle = estilo.fondo;
   c.fillRect(0, 0, cv.width, cv.height);
   c.translate(margen, margen);
-  render(c, ts, tema, $('in-rejilla-png').checked);
+  render(c, ts, estilo, $('in-rejilla-png').checked);
   const a = document.createElement('a');
   a.download = 'mapa_' + E.tipo + '_' + E.seed.replace(/[^\w-]/g, '_') + '.png';
   a.href = cv.toDataURL('image/png');
@@ -1251,7 +1536,7 @@ $('in-archivo').addEventListener('change', e => {
       if(!d.tiles || !d.cols || !d.rows) throw new Error('formato');
       pilaDeshacer.length = 0; pilaRehacer.length = 0;
       E.seed = d.seed || 'importado'; E.tipo = d.tipo || 'mazmorra';
-      E.cols = d.cols; E.rows = d.rows; E.estetica = d.estetica || E.estetica;
+      E.cols = d.cols; E.rows = d.rows; E.estetica = normalizarEstetica(d.estetica || E.estetica);
       E.tiles = d.tiles; E.mob = d.mob || []; E.etq = d.etq || []; E.enlaces = d.enlaces || [];
       sincronizarPanel(); actualizarURL(); encajarVista(); dibujar(); guardarLocal();
       aviso('Mapa importado');
@@ -1266,7 +1551,7 @@ function arrancar(){
   const q = new URLSearchParams(location.search);
   const pSeed = q.get('seed'), pTipo = q.get('tipo');
   const pAncho = parseInt(q.get('ancho'), 10), pAlto = parseInt(q.get('alto'), 10);
-  const pEst = q.get('estetica');
+  const pEst = q.get('estetica') ? normalizarEstetica(q.get('estetica')) : null;
   let guardado = null;
   try{ guardado = JSON.parse(localStorage.getItem(CLAVE_LS)); }catch(err){ guardado = null; }
 
@@ -1278,11 +1563,11 @@ function arrancar(){
   if(coincide){
     E.seed = guardado.seed; E.tipo = guardado.tipo;
     E.cols = guardado.cols; E.rows = guardado.rows;
-    E.estetica = pEst && TEMAS[pEst] ? pEst : (guardado.estetica || 'pergamino');
+    E.estetica = pEst || normalizarEstetica(guardado.estetica || 'color');
     E.tiles = guardado.tiles; E.mob = guardado.mob || [];
     E.etq = guardado.etq || []; E.enlaces = guardado.enlaces || [];
   } else {
-    if(pEst && TEMAS[pEst]) E.estetica = pEst;
+    if(pEst) E.estetica = pEst;
     generar(pSeed || semillaAleatoria(), pTipo && GEN[pTipo] ? pTipo : 'mazmorra',
             pAncho || 40, pAlto || 30);
   }
