@@ -10,12 +10,22 @@ Es una web 100 % estática: un único `index.html` sin frameworks, sin dependenc
 
 ## ¿Qué hace?
 
-- Genera mapas de interiores sobre una **rejilla de casillas** (1 casilla = 5 pies, tamaño configurable de 20×20 a 60×40).
+- Genera mapas de interiores sobre una **rejilla de casillas** (1 casilla = 5 pies, tamaño configurable de **5×5 a 50×50**).
 - La generación es **determinista por semilla (seed)**: la misma seed con los mismos parámetros produce siempre exactamente el mismo mapa. Usa un PRNG sembrable (mulberry32), nunca `Math.random`.
 - La semilla es un **código alfanumérico abstracto** (p. ej. `WYRM-9K3X-7T2P`), con ~3·10¹⁸ combinaciones: cada semilla da un mapa marcadamente distinto. Botón 🎲 para una aleatoria.
 - Seed y parámetros van **codificados en la URL** (`?seed=...&tipo=...&ancho=...&alto=...&estetica=...`), así que puedes compartir cualquier mapa con un enlace.
 - Cada localización combina un **algoritmo de trazado** con **decoradores de sala** y un vocabulario de etiquetas propio, así que dos seeds del mismo tipo producen distribuciones, salas y mobiliario completamente diferentes.
 - **Garantía de conectividad**: tras generar, un análisis de componentes conexas comprueba que todas las salas son alcanzables y, si no lo son, excava pasillos hasta conectarlas. Nunca hay salas inaccesibles.
+
+## Novedades
+
+- **Carcasa (silueta exterior) procedural y distinta por tipo.** El contorno del mapa ya no es un rectángulo: cada localización genera su forma externa de manera procedural y coherente — la casa adopta plantas en **L/T**, el templo una **cruz** (cruciforme), la fortaleza un bloque con **bastiones** en las esquinas, las cuevas siluetas orgánicas (la del dragón una gran cámara redondeada, el árbol un tronco circular, la mina galerías alargadas), las torres son circulares y el barco conserva su casco.
+- **Coherencia garantizada.** Los edificios se trazan con un **pasillo de circulación**: cada sala da al pasillo (o a una sala ya conectada), de modo que no hay distribuciones absurdas como una cocina a la que solo se llega cruzando un dormitorio. Además hay **topes por rol** (p. ej. un único aseo o una sola cocina por casa), así que no salen «7 baños».
+- **Puzzle de varios mapas.** Con **➕ Añadir mapa** se engancha una pieza nueva (generada proceduralmente) a la derecha del conjunto. Puedes **seleccionar y editar cada pieza por separado** (clic para activarla; la activa se resalta en dorado) y al **descargar PNG o exportar JSON** se guardan todas juntas como una sola imagen/archivo.
+- **Iluminación y sombras.** Las antorchas, braseros, fogatas, velas, chimeneas, forjas, lava y círculos mágicos **emiten luz** que se proyecta por la escena; los muros **bloquean la luz** y generan sombras (línea de visión), y las casillas sin iluminar quedan a oscuras. Colocar una antorcha «pinta» la zona al instante. Se puede activar/desactivar.
+- **Ventanas.** Los edificios de superficie reciben **ventanas** en sus muros exteriores (con su cristal dibujado), que dejan entrar **luz diurna**. Hay una herramienta para añadirlas o quitarlas a mano.
+- **Leyenda.** Un recuadro muestra, con su icono y su nombre, **todos los objetos presentes en el mapa que se está mostrando**; se incluye también en el PNG exportado.
+- **Objetos grandes.** El mobiliario puede ocupar **más de una casilla**: mesas de banquete (3×1), camas dobles (2×2), grandes estatuas (2×2), altar mayor (2×1), montones de gran tesoro…
 
 ## 18 tipos de localización
 

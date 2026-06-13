@@ -152,15 +152,20 @@
     <div class="fila">
       <div>
         <label for="in-ancho">Ancho (casillas)</label>
-        <input type="number" id="in-ancho" min="20" max="60" value="40">
+        <input type="number" id="in-ancho" min="5" max="50" value="40">
       </div>
       <div>
         <label for="in-alto">Alto (casillas)</label>
-        <input type="number" id="in-alto" min="20" max="40" value="30">
+        <input type="number" id="in-alto" min="5" max="50" value="30">
       </div>
     </div>
     <button class="primario" id="bt-generar">⚒ Generar mapa</button>
     <button id="bt-enlace" style="width:100%;margin-top:6px">🔗 Copiar enlace para compartir</button>
+    <div class="fila" style="margin-top:6px">
+      <button id="bt-add-mapa">➕ Añadir mapa</button>
+      <button id="bt-del-mapa">🗑 Quitar mapa</button>
+    </div>
+    <div class="nota">«Añadir mapa» engancha una pieza nueva al puzzle (generada proceduralmente). Haz clic en una pieza para seleccionarla y editarla; al exportar se descargan todas juntas.</div>
   </fieldset>
 
   <fieldset>
@@ -175,6 +180,14 @@
       <input type="checkbox" id="in-rejilla" checked>
       <label for="in-rejilla">Mostrar rejilla</label>
     </div>
+    <div class="check">
+      <input type="checkbox" id="in-luz" checked>
+      <label for="in-luz">Iluminación y sombras</label>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="in-leyenda" checked>
+      <label for="in-leyenda">Mostrar leyenda</label>
+    </div>
     <div class="nota">Cambiar la estética no regenera el mapa: solo cambia la presentación.</div>
   </fieldset>
 
@@ -185,6 +198,7 @@
       <button data-herr="suelo">▦ Pintar suelo</button>
       <button data-herr="muro">▣ Pintar muro</button>
       <button data-herr="puerta">🚪 Puerta</button>
+      <button data-herr="ventana">🪟 Ventana</button>
       <button data-herr="mobiliario">🪑 Mobiliario</button>
       <button data-herr="etiqueta">✎ Etiqueta</button>
       <button data-herr="borrar">⌫ Borrador</button>
@@ -263,14 +277,22 @@ function barajar(rnd, arr){
 }
 
 /* ───── Tipos de casilla ───── */
-const T = { ROCA: 0, SUELO: 1, MURO: 2, PUERTA: 3, SECRETA: 4 };
+const T = { ROCA: 0, SUELO: 1, MURO: 2, PUERTA: 3, SECRETA: 4, VENTANA: 6 };
 const esPiso = t => t === T.SUELO || t === T.PUERTA || t === T.SECRETA;
+const esMuro = t => t === T.MURO || t === T.VENTANA;   // bloquea paso (la ventana deja pasar la luz)
 
-/* ───── Estado global del mapa ───── */
-const E = {
-  seed: '', tipo: 'mazmorra', cols: 40, rows: 30, estetica: 'color',
-  tiles: [], mob: [], etq: [], enlaces: []   // enlaces: pares de casillas unidas por escaleras (torre)
-};
+/* ───── Estado: varios mapas (puzzle), uno activo apuntado por E ───── */
+function nuevoMapa(){
+  return {
+    seed: '', tipo: 'mazmorra', cols: 40, rows: 30, estetica: 'color',
+    tiles: [], mob: [], etq: [], enlaces: [], shell: null,
+    offX: 0, offY: 0   // posición de la pieza en el tablero (en casillas)
+  };
+}
+let mapas = [nuevoMapa()];
+let activo = 0;
+let E = mapas[0];                                  // mapa activo (lo usan todas las funciones)
+function conMapa(m, fn){ const prev = E; E = m; try{ return fn(); } finally{ E = prev; } }
 
 const idx    = (x, y) => y * E.cols + x;
 const dentro = (x, y) => x >= 0 && y >= 0 && x < E.cols && y < E.rows;
@@ -280,13 +302,13 @@ function setT(x, y, v){ if(dentro(x, y)) E.tiles[idx(x, y)] = v; }
 function carve(x, y, w, h){
   for(let j = y; j < y + h; j++)
     for(let i = x; i < x + w; i++)
-      if(dentro(i, j) && getT(i, j) !== T.PUERTA) setT(i, j, T.SUELO);
+      if(enShell(i, j) && getT(i, j) !== T.PUERTA) setT(i, j, T.SUELO);
 }
 function carveCirc(cx, cy, r){
   for(let j = cy - r; j <= cy + r; j++)
     for(let i = cx - r; i <= cx + r; i++){
       const dx = i - cx, dy = j - cy;
-      if(dx*dx + dy*dy <= r*r + 0.5 && dentro(i, j)) setT(i, j, T.SUELO);
+      if(dx*dx + dy*dy <= r*r + 0.5 && enShell(i, j)) setT(i, j, T.SUELO);
     }
 }
 function lineaSuelo(x1, y1, x2, y2){
@@ -315,6 +337,28 @@ function murosAuto(){
       if(vecino) E.tiles[idx(x,y)] = T.MURO;
     }
 }
+/* ───── Ventanas: huecos en muros exteriores (sólo edificios de superficie) ───── */
+function colocarVentanas(rnd, n){
+  const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+  const cand = [];
+  for(let y = 1; y < E.rows - 1; y++)
+    for(let x = 1; x < E.cols - 1; x++){
+      if(E.tiles[idx(x,y)] !== T.MURO) continue;
+      for(const [dx,dy] of dirs)
+        if(esPiso(getT(x+dx, y+dy)) && getT(x-dx, y-dy) === T.ROCA){ cand.push([x, y]); break; }
+    }
+  let puestas = 0;
+  for(const [x, y] of barajar(rnd, cand)){
+    if(puestas >= n) break;
+    let libre = true;
+    for(let dy = -1; dy <= 1 && libre; dy++)
+      for(let dx = -1; dx <= 1; dx++){
+        const t = getT(x+dx, y+dy);
+        if(t === T.VENTANA || t === T.PUERTA || t === T.SECRETA){ libre = false; break; }
+      }
+    if(libre){ E.tiles[idx(x,y)] = T.VENTANA; puestas++; }
+  }
+}
 /* capas de suelo (alfombra, agua, lava, musgo…): se dibujan BAJO el mobiliario */
 const OVERLAYS = {
   alfombra: { f:'#a03a32', b:'#6e2620', d:'#c8693e', rombo:true },
@@ -325,11 +369,36 @@ const OVERLAYS = {
   arena:    { f:'#cdb583', b:'#a08a55', d:'#e0cb9a', mota:true }
 };
 const esOverlay = t => !!OVERLAYS[t];
-function ocupada(x, y){ return E.mob.some(m => m.x === x && m.y === y && !esOverlay(m.t)); }
+/* objetos que ocupan más de una casilla [ancho, alto] en casillas */
+const TAM_MOB = {
+  mesa_banquete: [3, 1], cama_doble: [2, 2], gran_estatua: [2, 2],
+  estatua_grande: [1, 2], altar_mayor: [2, 1], gran_tesoro: [2, 2]
+};
+const tamMob = t => TAM_MOB[t] || [1, 1];
+function cubre(m, x, y){ const [w, h] = tamMob(m.t); return x >= m.x && x < m.x + w && y >= m.y && y < m.y + h; }
+function ocupada(x, y){ return E.mob.some(m => !esOverlay(m.t) && cubre(m, x, y)); }
+function cabe(x, y, t){
+  const [w, h] = tamMob(t);
+  for(let j = y; j < y + h; j++)
+    for(let i = x; i < x + w; i++)
+      if(!dentro(i, j) || !esPiso(getT(i, j)) || ocupada(i, j)) return false;
+  return true;
+}
 function addMob(x, y, t){
   if(!dentro(x, y) || !esPiso(getT(x, y))) return;
-  if(ocupada(x, y)) return;
+  if(!cabe(x, y, t)) return;
   E.mob.push({ x, y, t });
+}
+/* coloca un objeto grande probando el centro de la sala y casillas cercanas */
+function ponGrande(s, t){
+  const [w, h] = tamMob(t);
+  const cx = Math.floor(s.x + (s.w - w) / 2), cy = Math.floor(s.y + (s.h - h) / 2);
+  if(cabe(cx, cy, t)){ E.mob.push({ x: cx, y: cy, t }); return [cx, cy]; }
+  for(let r = 1; r <= 3; r++)
+    for(let dy = -r; dy <= r; dy++)
+      for(let dx = -r; dx <= r; dx++)
+        if(cabe(cx + dx, cy + dy, t)){ E.mob.push({ x: cx + dx, y: cy + dy, t }); return [cx + dx, cy + dy]; }
+  return null;
 }
 function addOverlay(x, y, t){
   if(!dentro(x, y) || !esPiso(getT(x, y))) return;
@@ -343,7 +412,7 @@ function overlayRect(x, y, w, h, t){
 }
 function alfombraRect(x, y, w, h){ overlayRect(x, y, w, h, 'alfombra'); }
 function addEtq(x, y, texto){ E.etq.push({ x, y, texto }); }
-function quitarMobEn(x, y){ E.mob = E.mob.filter(m => !(m.x === x && m.y === y)); }
+function quitarMobEn(x, y){ E.mob = E.mob.filter(m => esOverlay(m.t) ? !(m.x === x && m.y === y) : !cubre(m, x, y)); }
 
 /* ───── Conectividad: todas las salas alcanzables, siempre ───── */
 function componentes(){
@@ -626,25 +695,34 @@ function salaDeCeldas(cel){
 function layoutCueva(rnd, opt){
   opt = opt || {};
   const W = E.cols, H = E.rows, relleno = opt.relleno || 0.45, it = opt.iter || 5;
+  const pm = opt.preMask || ((x, y) => x >= 2 && y >= 2 && x < W-2 && y < H-2);
+  shellDesde(pm);                          // la máscara define la silueta exterior
   let g = new Uint8Array(W * H);
   for(let y = 0; y < H; y++)
     for(let x = 0; x < W; x++)
-      g[y*W+x] = (x < 2 || y < 2 || x >= W-2 || y >= H-2) ? 1 : (rnd() < relleno ? 1 : 0);
+      g[y*W+x] = !enShell(x, y) ? 1 : (rnd() < relleno ? 1 : 0);
   for(let s = 0; s < it; s++){
     const n = new Uint8Array(W * H);
     for(let y = 0; y < H; y++)
       for(let x = 0; x < W; x++){
-        if(x < 1 || y < 1 || x >= W-1 || y >= H-1){ n[y*W+x] = 1; continue; }
+        if(!enShell(x, y)){ n[y*W+x] = 1; continue; }
         let w = 0;
-        for(let dy = -1; dy <= 1; dy++) for(let dx = -1; dx <= 1; dx++){ if(!dx && !dy) continue; if(g[(y+dy)*W + (x+dx)]) w++; }
+        for(let dy = -1; dy <= 1; dy++) for(let dx = -1; dx <= 1; dx++){ if(!dx && !dy) continue; const nx = x+dx, ny = y+dy; if(nx < 0 || ny < 0 || nx >= W || ny >= H || g[ny*W+nx]) w++; }
         n[y*W+x] = w >= 5 ? 1 : 0;
       }
     g = n;
   }
   for(let i = 0; i < W*H; i++) if(!g[i]) E.tiles[i] = T.SUELO;
+  // fallback: si el autómata cerró toda la cueva (mapas pequeños), abre el interior de la silueta
+  let huboSuelo = false;
+  for(let i = 0; i < W*H; i++) if(E.tiles[i] === T.SUELO){ huboSuelo = true; break; }
+  if(!huboSuelo)
+    for(let y = 1; y < H-1; y++) for(let x = 1; x < W-1; x++) if(enShell(x, y)) E.tiles[idx(x,y)] = T.SUELO;
   murosAuto();
   const regs = regionesPiso().sort((a, b) => b.length - a.length);
-  return regs.filter(r => r.length >= (opt.minRegion || 12)).map(salaDeCeldas);
+  let salas = regs.filter(r => r.length >= (opt.minRegion || 12));
+  if(!salas.length && regs.length) salas = [regs[0]];
+  return salas.map(salaDeCeldas);
 }
 
 /* ───── trazado: torre de plantas circulares unidas por escalera ───── */
@@ -720,6 +798,179 @@ function trampasEnPasillos(rnd, salas, n){
   }
 }
 
+/* ════════════ CARCASAS (forma externa procedural) ════════════
+   Cada tipo declara una silueta distinta. La generación se limita a la
+   máscara `E.shell`, así que el contorno exterior también es procedural. */
+function enShell(x, y){ return dentro(x, y) && (!E.shell || E.shell[idx(x,y)] === 1); }
+function nuevaShell(){ E.shell = new Uint8Array(E.cols * E.rows); return E.shell; }
+function shellDesde(fn){
+  const s = nuevaShell();
+  for(let y = 0; y < E.rows; y++)
+    for(let x = 0; x < E.cols; x++) if(fn(x, y)) s[idx(x, y)] = 1;
+  return s;
+}
+function carveShell(){
+  for(let y = 0; y < E.rows; y++)
+    for(let x = 0; x < E.cols; x++)
+      if(E.shell[idx(x,y)] && getT(x,y) !== T.PUERTA) setT(x, y, T.SUELO);
+}
+function bboxShell(){
+  let x0 = E.cols, y0 = E.rows, x1 = 0, y1 = 0, hay = false;
+  for(let y = 0; y < E.rows; y++)
+    for(let x = 0; x < E.cols; x++)
+      if(E.shell[idx(x,y)]){ hay = true; x0 = Math.min(x0,x); y0 = Math.min(y0,y); x1 = Math.max(x1,x); y1 = Math.max(y1,y); }
+  return hay ? { x: x0, y: y0, w: x1-x0+1, h: y1-y0+1 } : { x: 1, y: 1, w: E.cols-2, h: E.rows-2 };
+}
+/* siluetas */
+function formaRect(rnd){
+  const mx = ri(rnd, 1, Math.max(1, Math.floor(E.cols*0.12)));
+  const my = ri(rnd, 1, Math.max(1, Math.floor(E.rows*0.12)));
+  return shellDesde((x,y) => x >= mx && y >= my && x < E.cols-mx && y < E.rows-my);
+}
+function formaElipse(rnd){
+  const cx = (E.cols-1)/2, cy = (E.rows-1)/2, rx = E.cols/2 - 1.2, ry = E.rows/2 - 1.2;
+  return shellDesde((x,y) => { const dx = (x-cx)/rx, dy = (y-cy)/ry; return dx*dx + dy*dy <= 1; });
+}
+function formaL(rnd){
+  const x0 = 1, y0 = 1, x1 = E.cols-2, y1 = E.rows-2;
+  const cw = ri(rnd, Math.floor((x1-x0)*0.35), Math.floor((x1-x0)*0.55));
+  const ch = ri(rnd, Math.floor((y1-y0)*0.35), Math.floor((y1-y0)*0.55));
+  const esq = ri(rnd, 0, 3);
+  return shellDesde((x,y) => {
+    if(x < x0 || y < y0 || x > x1 || y > y1) return false;
+    const right = x > x1-cw, bottom = y > y1-ch, left = x < x0+cw, top = y < y0+ch;
+    if(esq === 0 && right && bottom) return false;
+    if(esq === 1 && left && bottom) return false;
+    if(esq === 2 && right && top) return false;
+    if(esq === 3 && left && top) return false;
+    return true;
+  });
+}
+function formaT(rnd){
+  const x0 = 1, y0 = 1, x1 = E.cols-2, y1 = E.rows-2;
+  const barra = ri(rnd, Math.floor((y1-y0)*0.3), Math.floor((y1-y0)*0.45));
+  const px = Math.floor((x0+x1)/2), pw = Math.max(2, Math.floor((x1-x0)*0.32));
+  return shellDesde((x,y) => {
+    if(x < x0 || y < y0 || x > x1 || y > y1) return false;
+    return y <= y0+barra || Math.abs(x-px) <= pw;
+  });
+}
+function formaCruz(rnd){
+  const x0 = 1, y0 = 1, x1 = E.cols-2, y1 = E.rows-2;
+  const px = Math.floor((x0+x1)/2), py = Math.floor((y0+y1)/2);
+  const bw = Math.max(2, Math.floor((x1-x0)*0.30)), bh = Math.max(2, Math.floor((y1-y0)*0.30));
+  return shellDesde((x,y) => {
+    if(x < x0 || y < y0 || x > x1 || y > y1) return false;
+    return Math.abs(x-px) <= bw || Math.abs(y-py) <= bh;
+  });
+}
+function formaBastiones(rnd){
+  const mx = 2 + ri(rnd,0,1), my = 2 + ri(rnd,0,1);
+  const x0 = mx, y0 = my, x1 = E.cols-1-mx, y1 = E.rows-1-my;
+  const r = Math.max(2, Math.floor(Math.min(x1-x0, y1-y0)*0.22));
+  const esquinas = [[x0,y0],[x1,y0],[x0,y1],[x1,y1]];
+  return shellDesde((x,y) => {
+    if(x >= x0 && y >= y0 && x <= x1 && y <= y1) return true;
+    for(const [ex,ey] of esquinas){ const dx = x-ex, dy = y-ey; if(dx*dx + dy*dy <= r*r) return true; }
+    return false;
+  });
+}
+
+/* ════════════ EDIFICIO COHERENTE (footprint + pasillo + salas) ════════════
+   Carva toda la carcasa, abre un pasillo de circulación y reparte salas que
+   SIEMPRE dan al pasillo (o a una sala ya conectada): evita la incoherencia
+   de salas a las que sólo se llega cruzando otras. */
+function etiquetarRegiones(){
+  const lab = new Int32Array(E.cols*E.rows).fill(-1);
+  const regs = [];
+  for(let y = 0; y < E.rows; y++)
+    for(let x = 0; x < E.cols; x++){
+      if(!esPiso(E.tiles[idx(x,y)]) || lab[idx(x,y)] >= 0) continue;
+      const id = regs.length, cola = [[x,y]], cel = []; lab[idx(x,y)] = id;
+      while(cola.length){
+        const [cx, cy] = cola.pop(); cel.push([cx, cy]);
+        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+          const nx = cx+dx, ny = cy+dy;
+          if(dentro(nx,ny) && esPiso(E.tiles[idx(nx,ny)]) && lab[idx(nx,ny)] < 0){ lab[idx(nx,ny)] = id; cola.push([nx,ny]); }
+        }
+      }
+      regs.push(cel);
+    }
+  return { lab, regs };
+}
+function particionPared(rnd, x, y, w, h, min, libre){
+  if(w < min*2+1 && h < min*2+1) return;
+  if(w*h <= min*min*4 && rnd() < 0.30) return;
+  const puedeV = w >= min*2+1, puedeH = h >= min*2+1;
+  const vert = puedeV && puedeH ? (w >= h ? rnd() < 0.65 : rnd() < 0.35) : puedeV;
+  if(vert){
+    const cx = x + min + Math.floor(rnd()*(w-2*min));
+    for(let j = y; j < y+h; j++) if(esPiso(getT(cx,j)) && !libre.has(cx+','+j)) setT(cx, j, T.MURO);
+    particionPared(rnd, x, y, cx-x, h, min, libre);
+    particionPared(rnd, cx+1, y, x+w-cx-1, h, min, libre);
+  } else {
+    const cy = y + min + Math.floor(rnd()*(h-2*min));
+    for(let i = x; i < x+w; i++) if(esPiso(getT(i,cy)) && !libre.has(i+','+cy)) setT(i, cy, T.MURO);
+    particionPared(rnd, x, y, w, cy-y, min, libre);
+    particionPared(rnd, x, cy+1, w, y+h-cy-1, min, libre);
+  }
+}
+function abrirEntrada(rnd, libre){
+  const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+  const cand = [];
+  for(let y = 1; y < E.rows-1; y++)
+    for(let x = 1; x < E.cols-1; x++){
+      if(E.tiles[idx(x,y)] !== T.MURO) continue;
+      for(const [dx,dy] of dirs)
+        if(esPiso(getT(x+dx,y+dy)) && getT(x-dx,y-dy) === T.ROCA){
+          cand.push({ x, y, score: y*2 + (libre && libre.has((x+dx)+','+(y+dy)) ? 1000 : 0) }); break;
+        }
+    }
+  if(cand.length){ cand.sort((a,b) => b.score - a.score); setT(cand[0].x, cand[0].y, T.PUERTA); }
+}
+function layoutEdificioPasillo(rnd, opt){
+  opt = opt || {};
+  carveShell(); murosAuto();
+  const bb = bboxShell();
+  const min = opt.min || 4, ancho = opt.anchoPasillo || 1;
+  const libre = new Set();
+  const ponLibre = (x,y) => { if(enShell(x,y)){ setT(x,y,T.SUELO); libre.add(x+','+y); } };
+  const horiz = bb.w >= bb.h ? rnd() < 0.65 : rnd() < 0.35;
+  if(horiz){
+    const cy = bb.y + Math.floor(bb.h/2) + ri(rnd,-1,1);
+    for(let x = bb.x; x < bb.x+bb.w; x++) for(let o = 0; o < ancho; o++) ponLibre(x, cy+o);
+    if(bb.h >= 12 && rnd() < 0.6){ const bx = bb.x + Math.floor(bb.w/2) + ri(rnd,-2,2); for(let y = bb.y; y < bb.y+bb.h; y++) ponLibre(bx, y); }
+  } else {
+    const cx = bb.x + Math.floor(bb.w/2) + ri(rnd,-1,1);
+    for(let y = bb.y; y < bb.y+bb.h; y++) for(let o = 0; o < ancho; o++) ponLibre(cx+o, y);
+    if(bb.w >= 12 && rnd() < 0.6){ const by = bb.y + Math.floor(bb.h/2) + ri(rnd,-2,2); for(let x = bb.x; x < bb.x+bb.w; x++) ponLibre(x, by); }
+  }
+  particionPared(rnd, bb.x, bb.y, bb.w, bb.h, min, libre);
+  murosAuto();
+  const { lab, regs } = etiquetarRegiones();
+  let corrId = -1;
+  for(const clave of libre){ const [x,y] = clave.split(',').map(Number); if(dentro(x,y) && lab[idx(x,y)] >= 0){ corrId = lab[idx(x,y)]; break; } }
+  const cand = [];
+  for(let y = 1; y < E.rows-1; y++)
+    for(let x = 1; x < E.cols-1; x++){
+      if(E.tiles[idx(x,y)] !== T.MURO) continue;
+      for(const [[ax,ay],[bx,by]] of [[[-1,0],[1,0]], [[0,-1],[0,1]]]){
+        const ra = esPiso(getT(x+ax,y+ay)) ? lab[idx(x+ax,y+ay)] : -1;
+        const rb = esPiso(getT(x+bx,y+by)) ? lab[idx(x+bx,y+by)] : -1;
+        if(ra >= 0 && rb >= 0 && ra !== rb){ cand.push({ x, y, a: ra, b: rb, corr: (ra === corrId || rb === corrId) }); break; }
+      }
+    }
+  const padre = regs.map((_, i) => i);
+  const buscar = i => padre[i] === i ? i : (padre[i] = buscar(padre[i]));
+  const orden = barajar(rnd, cand).sort((p,q) => (q.corr?1:0) - (p.corr?1:0));
+  for(const p of orden){ const ra = buscar(p.a), rb = buscar(p.b); if(ra !== rb){ padre[ra] = rb; setT(p.x, p.y, T.PUERTA); } }
+  for(const p of cand) if(rnd() < 0.05 && getT(p.x,p.y) === T.MURO) setT(p.x, p.y, T.PUERTA);
+  abrirEntrada(rnd, libre);
+  const salas = [];
+  regs.forEach((cel, i) => { if(i !== corrId && cel.length >= (opt.minArea || 4)) salas.push(salaDeCeldas(cel)); });
+  return salas;
+}
+
 /* ════════════ DECORADORES DE SALA ════════════ */
 const DEC = {
   vacia(s, rnd){ if(rnd() < 0.4) esparcir(s, rnd, rnd() < 0.5 ? 'caja' : 'barril', 1); if(rnd() < 0.25) esparcir(s, rnd, 'escombro', ri(rnd,1,2)); },
@@ -765,7 +1016,14 @@ const DEC = {
   vetas(s, rnd){ esparcirBorde(s, rnd, 'gemas', Math.max(2, Math.floor(areaSala(s)/8))); if(rnd() < 0.6) esparcir(s, rnd, 'caja', 1); esparcirBorde(s, rnd, 'estalagmita', 2); },
   establo(s, rnd){ esparcir(s, rnd, 'paja', 4); if(rnd() < 0.6) esparcir(s, rnd, 'barril', 2); },
   barraTaberna(s, rnd){ const lim = Math.min(s.x + s.w - 1, s.x + ri(rnd, 4, Math.max(4, Math.floor(s.w * 0.6)))); for(let x = s.x + 1; x < lim; x++) addMob(x, s.y + 1, 'barra'); esparcirBorde(s, rnd, 'barril', 2); },
-  salonTaberna(s, rnd){ mesasRedondas(s, rnd); if(rnd() < 0.8) ponEn(s, 0.94, 0.12, 'chimenea'); }
+  salonTaberna(s, rnd){ mesasRedondas(s, rnd); if(rnd() < 0.8) ponEn(s, 0.94, 0.12, 'chimenea'); },
+  nave(s, rnd){
+    const [cx, cy] = centroSala(s);
+    if(rnd() < 0.5) ponGrande(s, 'altar_mayor'); else { addMob(cx, s.y + 1, 'altar'); addMob(cx-1, s.y + 1, 'brasero'); addMob(cx+1, s.y + 1, 'brasero'); }
+    runnerAlfombra(s);
+    for(let y = s.y + 3; y < s.y + s.h - 1; y += ri(rnd, 2, 3)){ addMob(s.x + 1, y, 'columna'); addMob(s.x + s.w - 2, y, 'columna'); }
+    for(let y = s.y + 4; y < s.y + s.h - 1; y += 2){ addMob(cx - 2, y, 'banco'); addMob(cx + 2, y, 'banco'); }
+  }
 };
 
 /* ════════════ ASIGNACIÓN DE ROLES ════════════ */
@@ -784,8 +1042,11 @@ function asignarRoles(rnd, salas, cfg){
     const p = elegir(rnd, cfg.principal);   // [decorador, [etiquetas]]
     etqSala(orden[0], elegir(rnd, p[1])); DEC[p[0]](orden[0], rnd); i0 = 1;
   }
+  const cont = {};
   for(let i = i0; i < orden.length; i++){
-    const e = pesoElegir(rnd, cfg.roles);    // [peso, decorador, [etiquetas]]
+    const disp = cfg.roles.filter(e => !e[3] || (cont[e[1]] || 0) < e[3]);   // e[3] = tope opcional
+    const e = pesoElegir(rnd, disp.length ? disp : cfg.roles);
+    cont[e[1]] = (cont[e[1]] || 0) + 1;
     etqSala(orden[i], elegir(rnd, e[2])); DEC[e[1]](orden[i], rnd);
   }
 }
@@ -795,7 +1056,8 @@ const TEMAS_MAPA = {
   mazmorra: {
     nombre: 'Mazmorra / cripta', suelo: '#b4a890', muro: '#6f6254', sueloTipo: 'losas', muroTipo: 'silleria',
     construir(rnd){
-      const salas = layoutSalas(rnd, { min: 4, sep: true, circ: 0.25, bucles: 0.3 });
+      (rnd() < 0.5 ? formaL : formaRect)(rnd);
+      const salas = layoutEdificioPasillo(rnd, { min: 4 });
       if(salas.length){ const [ax,ay] = centroSala(salas[0]); addMob(ax, ay, 'escalera_arriba'); const [bx,by] = centroSala(salas[salas.length-1]); addMob(bx, by, 'escalera_abajo'); }
       asignarRoles(rnd, salas, {
         principal: [['trono',['Sala del trono']], ['tesoreria',['Cámara del tesoro']], ['ritual',['Santuario profanado']], ['cripta',['Gran cripta']]],
@@ -807,7 +1069,8 @@ const TEMAS_MAPA = {
   cueva: {
     nombre: 'Cueva natural', suelo: '#9c8d77', muro: '#6b5d4a', sueloTipo: 'tierra', muroTipo: 'roca',
     construir(rnd){
-      const salas = layoutCueva(rnd, { relleno: 0.45, iter: 5, minRegion: 12 });
+      const cx = (E.cols-1)/2, cy = (E.rows-1)/2, rx = E.cols/2 - 1, ry = E.rows/2 - 1;
+      const salas = layoutCueva(rnd, { relleno: 0.45, iter: 5, minRegion: 12, preMask: (x,y) => { const dx = (x-cx)/rx, dy = (y-cy)/ry; return dx*dx + dy*dy <= 1; } });
       asignarRoles(rnd, salas, {
         roles: [[3,'vacia',['Caverna','Gruta','Cámara']],[2,'hongos',['Salón de hongos']],[2,'estanque',['Laguna subterránea']],[2,'guarida',['Guarida','Madriguera']],[1,'osario',['Osario']]]
       });
@@ -816,48 +1079,33 @@ const TEMAS_MAPA = {
   taberna: {
     nombre: 'Taberna / posada', suelo: '#c9a36a', muro: '#7c6a4e', sueloTipo: 'tablones', muroTipo: 'silleria',
     construir(rnd){
-      const salas = layoutSalaGrande(rnd, { banda: true, bandaH: ri(rnd, 4, 6) });
-      const hall = salas[0];
-      etqSala(hall, 'Salón');
-      DEC.barraTaberna(hall, rnd);
-      addEtq(hall.x + 2.5, hall.y + 2.2, 'Barra');
-      DEC.salonTaberna(hall, rnd);
-      salas.slice(1).forEach((s, i) => {
-        if(i === 0){ etqSala(s, 'Cocina'); DEC.cocina(s, rnd); }
-        else if(i === 1 && salas.length > 3){ etqSala(s, 'Despensa'); DEC.despensa(s, rnd); }
-        else { etqSala(s, 'Habitación ' + Math.max(1, i)); DEC.dormitorio(s, rnd); }
+      formaL(rnd);
+      const salas = layoutEdificioPasillo(rnd, { min: 4 });
+      asignarRoles(rnd, salas, {
+        principal: [['salonTaberna',['Salón','Taberna']]],
+        roles: [[2,'barraTaberna',['Barra','Mostrador'],1],[2,'cocina',['Cocina'],1],[1,'despensa',['Despensa'],1],[3,'dormitorio',['Habitación','Alcoba']],[1,'comedor',['Comedor'],1]]
       });
     }
   },
   casa: {
     nombre: 'Casa / mansión', suelo: '#c9a36a', muro: '#9a8a6a', sueloTipo: 'tablones', muroTipo: 'silleria',
     construir(rnd){
-      const salas = layoutSalas(rnd, { min: 5, sep: false, puertasExtra: 0.12 });
-      let ent = salas[0]; for(const s of salas) if(s.y + s.h > ent.y + ent.h) ent = s;
-      setT(ent.x + Math.floor(ent.w/2), ent.y + ent.h, T.PUERTA);
+      (rnd() < 0.5 ? formaL : formaT)(rnd);
+      const salas = layoutEdificioPasillo(rnd, { min: 4 });
       asignarRoles(rnd, salas, {
         principal: [['salon',['Salón','Gran salón']]],
-        roles: [[3,'dormitorio',['Dormitorio','Alcoba']],[2,'comedor',['Comedor']],[1,'cocina',['Cocina']],[2,'estudio',['Estudio','Despacho']],[1,'biblioteca',['Biblioteca']],[1,'despensa',['Despensa']],[1,'bano',['Aseo']],[1,'dormitorioLujo',['Dormitorio principal']]]
+        roles: [[3,'dormitorio',['Dormitorio','Alcoba']],[2,'comedor',['Comedor'],1],[1,'cocina',['Cocina'],1],[2,'estudio',['Estudio','Despacho'],2],[1,'biblioteca',['Biblioteca'],1],[1,'despensa',['Despensa'],1],[1,'bano',['Aseo'],1],[1,'dormitorioLujo',['Dormitorio principal'],1]]
       });
     }
   },
   templo: {
     nombre: 'Templo / monasterio', suelo: '#cdc6b4', muro: '#8f8678', sueloTipo: 'marmol', muroTipo: 'silleria',
     construir(rnd){
-      const salas = layoutSalaGrande(rnd, { banda: rnd() < 0.75, bandaH: 4 });
-      const hall = salas[0], cx = hall.x + Math.floor(hall.w / 2);
-      etqSala(hall, 'Nave');
-      addMob(cx, hall.y + 1, 'altar'); addMob(cx-1, hall.y + 1, 'brasero'); addMob(cx+1, hall.y + 1, 'brasero');
-      runnerAlfombra(hall);
-      const gap = ri(rnd, 2, 3);
-      for(let y = hall.y + 3; y < hall.y + hall.h - 1; y += gap){ addMob(hall.x + 2, y, 'columna'); addMob(hall.x + hall.w - 3, y, 'columna'); }
-      for(let y = hall.y + 4; y < hall.y + hall.h - 1; y += 2){ addMob(cx - 2, y, 'banco'); addMob(cx + 2, y, 'banco'); }
-      salas.slice(1).forEach((s, i) => {
-        const r = i === 0 ? 'sacristia' : elegir(rnd, ['celda','santuario','biblioteca']);
-        if(r === 'sacristia'){ etqSala(s, 'Sacristía'); bordeEstanterias(s, rnd, 0.6); esparcir(s, rnd, 'cofre', 1); }
-        else if(r === 'celda'){ etqSala(s, 'Celda'); DEC.celda(s, rnd); }
-        else if(r === 'santuario'){ etqSala(s, 'Capilla'); DEC.santuario(s, rnd); }
-        else { etqSala(s, 'Biblioteca'); DEC.biblioteca(s, rnd); }
+      formaCruz(rnd);
+      const salas = layoutEdificioPasillo(rnd, { min: 5 });
+      asignarRoles(rnd, salas, {
+        principal: [['nave',['Nave','Santuario']]],
+        roles: [[2,'santuario',['Capilla','Altar'],3],[2,'celda',['Celda monacal','Celda']],[1,'biblioteca',['Scriptorium','Biblioteca'],2],[1,'estudio',['Sacristía'],1],[1,'cripta',['Cripta']]]
       });
     }
   },
@@ -880,7 +1128,8 @@ const TEMAS_MAPA = {
   guarida_dragon: {
     nombre: 'Guarida de dragón', suelo: '#9a7654', muro: '#6a4838', sueloTipo: 'tierra', muroTipo: 'roca',
     construir(rnd){
-      const salas = layoutCueva(rnd, { relleno: 0.42, iter: 5, minRegion: 14 });
+      const cx = (E.cols-1)/2, cy = (E.rows-1)/2, rx = E.cols/2 - 0.5, ry = E.rows/2 - 0.5;
+      const salas = layoutCueva(rnd, { relleno: 0.40, iter: 5, minRegion: 14, preMask: (x,y) => { const dx = (x-cx)/rx, dy = (y-cy)/ry; return dx*dx + dy*dy <= 1; } });
       asignarRoles(rnd, salas, {
         principal: [['hoard',['Cámara del tesoro','Lecho del dragón','Tesoro acumulado']]],
         roles: [[3,'guarida',['Cubil','Madriguera']],[2,'osario',['Cementerio de presas','Osario']],[2,'vacia',['Caverna','Gruta']],[1,'estanque',['Charca sulfurosa']]]
@@ -891,7 +1140,8 @@ const TEMAS_MAPA = {
   arbol: {
     nombre: 'Interior de árbol antiguo', suelo: '#7d5a34', muro: '#553c22', sueloTipo: 'organico', muroTipo: 'corteza',
     construir(rnd){
-      const salas = layoutCueva(rnd, { relleno: 0.46, iter: 4, minRegion: 12 });
+      const cx = (E.cols-1)/2, cy = (E.rows-1)/2, rr = Math.min(E.cols, E.rows)/2 - 1;
+      const salas = layoutCueva(rnd, { relleno: 0.46, iter: 4, minRegion: 12, preMask: (x,y) => { const dx = x-cx, dy = y-cy; return dx*dx + dy*dy <= rr*rr; } });
       asignarRoles(rnd, salas, {
         principal: [['raices',['Corazón del árbol','Cámara de las raíces']]],
         roles: [[3,'hongos',['Gruta de hongos','Salón musgoso']],[2,'raices',['Nudo de raíces']],[2,'estanque',['Manantial']],[2,'vacia',['Hueco','Cavidad']],[1,'biblioteca',['Refugio del druida']]]
@@ -901,7 +1151,8 @@ const TEMAS_MAPA = {
   alcantarilla: {
     nombre: 'Alcantarillas', suelo: '#7e8472', muro: '#565a4c', sueloTipo: 'losas', muroTipo: 'silleria',
     construir(rnd){
-      const salas = layoutRejilla(rnd, { cw: ri(rnd,4,6), ch: ri(rnd,4,6), bucles: 0.5 });
+      formaRect(rnd);
+      const salas = layoutEdificioPasillo(rnd, { min: 4, anchoPasillo: 2 });
       // canales de agua por los pasillos
       for(let y = 0; y < E.rows; y++) for(let x = 0; x < E.cols; x++)
         if(getT(x,y) === T.SUELO && !salas.some(s => enRect(s,x,y)) && hx(x,y,31) < 0.6) addOverlay(x, y, 'agua');
@@ -913,7 +1164,8 @@ const TEMAS_MAPA = {
   mina: {
     nombre: 'Mina abandonada', suelo: '#8a7a64', muro: '#695a48', sueloTipo: 'tierra', muroTipo: 'roca',
     construir(rnd){
-      const salas = layoutCueva(rnd, { relleno: 0.44, iter: 4, minRegion: 10 });
+      const cy = (E.rows-1)/2, bandH = Math.max(3, Math.floor(E.rows*0.55));
+      const salas = layoutCueva(rnd, { relleno: 0.46, iter: 4, minRegion: 10, preMask: (x,y) => x >= 2 && x < E.cols-2 && Math.abs(y-cy) <= bandH/2 });
       asignarRoles(rnd, salas, {
         principal: [['almacenSala',['Entrada de la mina']]],
         roles: [[3,'vetas',['Veta de mineral','Galería']],[2,'vacia',['Túnel','Cámara excavada']],[1,'almacenSala',['Almacén']],[1,'guarida',['Refugio']],[1,'estanque',['Filtración']]]
@@ -923,27 +1175,30 @@ const TEMAS_MAPA = {
   prision: {
     nombre: 'Prisión / calabozos', suelo: '#9a948a', muro: '#5e574c', sueloTipo: 'losas', muroTipo: 'silleria',
     construir(rnd){
-      const salas = layoutRejilla(rnd, { cw: 4, ch: 4, bucles: 0.3 });
+      formaRect(rnd);
+      const salas = layoutEdificioPasillo(rnd, { min: 3 });
       asignarRoles(rnd, salas, {
         principal: [['guardia',['Cuerpo de guardia']], ['tortura',['Sala de tortura']]],
-        roles: [[6,'celda',['Celda','Mazmorra']],[1,'tortura',['Sala de tortura']],[1,'armeria',['Arsenal']],[1,'vacia',['Almacén']]]
+        roles: [[6,'celda',['Celda','Mazmorra']],[1,'tortura',['Sala de tortura'],1],[1,'armeria',['Arsenal'],1],[1,'vacia',['Almacén']]]
       });
     }
   },
   catacumbas: {
     nombre: 'Catacumbas', suelo: '#b0a890', muro: '#6b6150', sueloTipo: 'losas', muroTipo: 'silleria',
     construir(rnd){
-      const salas = layoutRejilla(rnd, { cw: ri(rnd,4,5), ch: ri(rnd,4,5), bucles: 0.55 });
+      formaRect(rnd);
+      const salas = layoutEdificioPasillo(rnd, { min: 3 });
       asignarRoles(rnd, salas, {
         principal: [['santuario',['Cámara funeraria']]],
-        roles: [[4,'cripta',['Cripta','Nicho','Tumba']],[2,'osario',['Osario']],[1,'santuario',['Altar funerario']],[1,'vacia',['Galería']]]
+        roles: [[4,'cripta',['Cripta','Nicho','Tumba']],[2,'osario',['Osario']],[1,'santuario',['Altar funerario'],1],[1,'vacia',['Galería']]]
       });
     }
   },
   fortaleza: {
     nombre: 'Fortaleza / cuartel', suelo: '#a59a86', muro: '#74695a', sueloTipo: 'losas', muroTipo: 'silleria',
     construir(rnd){
-      const salas = layoutSalas(rnd, { min: 4, sep: true, circ: 0.1, anchoPasillo: 2, bucles: 0.2 });
+      formaBastiones(rnd);
+      const salas = layoutEdificioPasillo(rnd, { min: 4, anchoPasillo: 2 });
       asignarRoles(rnd, salas, {
         principal: [['trono',['Sala del comandante']], ['comedor',['Refectorio']]],
         roles: [[3,'dormitorio',['Barracón','Dormitorio']],[2,'guardia',['Puesto de guardia']],[2,'armeria',['Armería']],[1,'forja',['Herrería']],[1,'almacenSala',['Almacén']],[1,'comedor',['Comedor']],[1,'celda',['Calabozo']]]
@@ -963,33 +1218,19 @@ const TEMAS_MAPA = {
   almacen: {
     nombre: 'Almacén / contrabandistas', suelo: '#c0a06a', muro: '#7a6a52', sueloTipo: 'tablones', muroTipo: 'silleria',
     construir(rnd){
-      const x0 = 2, y0 = 2, x1 = E.cols - 3, y1 = E.rows - 3;
-      carve(x0, y0, x1-x0+1, y1-y0+1);
-      const ow = ri(rnd, 5, 7), oh = ri(rnd, 4, 5);
-      for(let y = y0; y <= y0+oh; y++) setT(x0+ow, y, T.MURO);
-      for(let x = x0; x <= x0+ow; x++) setT(x, y0+oh, T.MURO);
-      setT(x0 + Math.floor(ow/2), y0+oh, T.PUERTA);
-      const hw = ri(rnd, 5, 6), hh = 4;
-      for(let y = y1-hh; y <= y1; y++) setT(x1-hw, y, T.MURO);
-      for(let x = x1-hw; x <= x1; x++) setT(x, y1-hh, T.MURO);
-      setT(x1-hw, y1-1, T.SECRETA);
-      murosAuto();
-      const office = { x: x0, y: y0, w: ow, h: oh };
-      const stash = { x: x1-hw+1, y: y1-hh+1, w: hw-1, h: hh-1 };
-      etqSala(office, 'Oficina'); addMob(x0+1, y0+1, 'mesa'); addMob(x0+2, y0+1, 'silla'); addMob(x0+1, y0+3, 'cofre');
-      etqSala(stash, 'Escondite'); esparcir(stash, rnd, 'cofre', 2); esparcir(stash, rnd, 'tesoro', 1); addMob(x1-1, y1, 'trampilla');
-      for(let x = x0+ow+3; x <= x1-hw-3; x += 3)
-        for(let y = y0+2; y <= y1-2; y++){ if((y-y0) % 6 >= 4) continue; if(esPiso(getT(x,y)) && !ocupada(x,y)) addMob(x, y, 'estanteria'); }
-      for(let k = 0; k < 10; k++){ const x = ri(rnd, x0+ow+1, x1-hw-1), y = ri(rnd, y0+1, y1-1); if(getT(x,y) === T.SUELO && !ocupada(x,y)) addMob(x, y, rnd() < 0.5 ? 'barril' : 'caja'); }
-      addEtq((x0+x1)/2, y0+oh+1.6, 'Almacén');
-      const ex = Math.floor((x0+x1)/2); setT(ex, y1+1, T.PUERTA); setT(ex+1, y1+1, T.PUERTA);
-      murosAuto();
+      formaRect(rnd);
+      const salas = layoutEdificioPasillo(rnd, { min: 4 });
+      asignarRoles(rnd, salas, {
+        principal: [['almacenSala',['Almacén','Depósito principal']]],
+        roles: [[3,'almacenSala',['Almacén','Depósito']],[2,'despensa',['Bodega']],[1,'tesoreria',['Escondite'],1],[1,'estudio',['Oficina'],1],[1,'vacia',['Trastero']]]
+      });
     }
   },
   laboratorio: {
     nombre: 'Laboratorio de alquimista', suelo: '#b3aa96', muro: '#70687a', sueloTipo: 'losas', muroTipo: 'silleria',
     construir(rnd){
-      const salas = layoutSalas(rnd, { min: 4, sep: true, circ: 0.15, bucles: 0.25 });
+      (rnd() < 0.5 ? formaT : formaRect)(rnd);
+      const salas = layoutEdificioPasillo(rnd, { min: 4 });
       asignarRoles(rnd, salas, {
         principal: [['laboratorio',['Laboratorio principal']]],
         roles: [[2,'laboratorio',['Laboratorio','Destilería']],[2,'biblioteca',['Biblioteca']],[2,'estudio',['Estudio']],[2,'almacenSala',['Almacén de reactivos']],[1,'ritual',['Cámara arcana']],[1,'vacia',['Trastero']]]
@@ -1037,14 +1278,16 @@ const TEMAS_MAPA = {
 function generar(seed, tipo, cols, rows){
   if(!TEMAS_MAPA[tipo]) tipo = 'mazmorra';
   E.seed = seed; E.tipo = tipo;
-  E.cols = Math.max(20, Math.min(60, cols | 0));
-  E.rows = Math.max(20, Math.min(40, rows | 0));
+  E.cols = Math.max(5, Math.min(50, cols | 0));
+  E.rows = Math.max(5, Math.min(50, rows | 0));
   E.tiles = new Array(E.cols * E.rows).fill(T.ROCA);
-  E.mob = []; E.etq = []; E.enlaces = [];
+  E.mob = []; E.etq = []; E.enlaces = []; E.shell = null;
   const rnd = mulberry32(xmur3(seed + '|' + tipo + '|' + E.cols + 'x' + E.rows)());
   TEMAS_MAPA[tipo].construir(rnd);
   murosAuto();
   asegurarConectividad(rnd);
+  const CON_VENTANAS = { casa: 1, taberna: 1, templo: 1, fortaleza: 1, laboratorio: 1, barco: 1, torre_mago: 1, almacen: 1 };
+  if(CON_VENTANAS[tipo]) colocarVentanas(rnd, Math.max(2, Math.round((E.cols + E.rows) / 7)));
 }
 
 /* ════════════ ESTILOS DE DIBUJO (solo presentación) ════════════
@@ -1146,29 +1389,35 @@ const CATALOGO_MOB = [
   ['caja','Caja'], ['sarcofago','Sarcófago'], ['huesos','Huesos'], ['calavera','Calavera'],
   ['jaula','Jaula'], ['hongo','Hongos'], ['estalagmita','Estalagmita'], ['raiz','Raíces'],
   ['paja','Paja'], ['escombro','Escombros'],
+  ['antorcha','Antorcha'], ['fogata','Fogata'],
+  ['mesa_banquete','Mesa de banquete (3×1)'], ['cama_doble','Cama doble (2×2)'],
+  ['altar_mayor','Altar mayor (2×1)'], ['gran_estatua','Gran estatua (2×2)'],
+  ['estatua_grande','Estatua alta (1×2)'], ['gran_tesoro','Gran tesoro (2×2)'],
   ['alfombra','Alfombra'], ['agua','Agua'], ['lava','Lava'], ['musgo','Musgo'], ['sangre','Sangre']
 ];
 
 function dibujarMob(c, m, ts, estilo){
+  const [fw, fh] = tamMob(m.t);
+  const ax = ts * fw, ay = ts * fh, rs = Math.min(ax, ay);
   const x = m.x * ts, y = m.y * ts;
   c.lineJoin = 'round'; c.lineCap = 'round';
   const lw = Math.max(1, ts * 0.06);
   const R = (a,b,w,h,f,s,grosor) => {
-    if(f){ c.fillStyle = CF(f); c.fillRect(x+a*ts, y+b*ts, w*ts, h*ts); }
-    if(s){ c.strokeStyle = CS(s); c.lineWidth = grosor || lw; c.strokeRect(x+a*ts, y+b*ts, w*ts, h*ts); }
+    if(f){ c.fillStyle = CF(f); c.fillRect(x+a*ax, y+b*ay, w*ax, h*ay); }
+    if(s){ c.strokeStyle = CS(s); c.lineWidth = grosor || lw; c.strokeRect(x+a*ax, y+b*ay, w*ax, h*ay); }
   };
   const C = (a,b,r,f,s,grosor) => {
-    c.beginPath(); c.arc(x+a*ts, y+b*ts, r*ts, 0, Math.PI*2);
+    c.beginPath(); c.arc(x+a*ax, y+b*ay, r*rs, 0, Math.PI*2);
     if(f){ c.fillStyle = CF(f); c.fill(); }
     if(s){ c.strokeStyle = CS(s); c.lineWidth = grosor || lw; c.stroke(); }
   };
   const L = (a,b,d,e,s,grosor) => {
     c.strokeStyle = CS(s); c.lineWidth = grosor || lw;
-    c.beginPath(); c.moveTo(x+a*ts, y+b*ts); c.lineTo(x+d*ts, y+e*ts); c.stroke();
+    c.beginPath(); c.moveTo(x+a*ax, y+b*ay); c.lineTo(x+d*ax, y+e*ay); c.stroke();
   };
   const P = (puntos,f,s,grosor) => {            // polígono [[a,b],...]
     c.beginPath();
-    puntos.forEach((p, i) => i ? c.lineTo(x+p[0]*ts, y+p[1]*ts) : c.moveTo(x+p[0]*ts, y+p[1]*ts));
+    puntos.forEach((p, i) => i ? c.lineTo(x+p[0]*ax, y+p[1]*ay) : c.moveTo(x+p[0]*ax, y+p[1]*ay));
     c.closePath();
     if(f){ c.fillStyle = CF(f); c.fill(); }
     if(s){ c.strokeStyle = CS(s); c.lineWidth = grosor || lw; c.stroke(); }
@@ -1403,6 +1652,57 @@ function dibujarMob(c, m, ts, estilo){
     case 'escombro':
       for(let k = 0; k < 4; k++){ const a = hx(m.x,m.y,80+k), b = hx(m.x,m.y,90+k); C(.25+a*.5,.3+b*.5,.07+a*.05,'#8d8478','#56504a',lw*0.4); }
       break;
+    case 'antorcha':
+      L(.5,.92,.5,.4,'#5b3a1c',lw*1.5);
+      C(.5,.42,.13,'#3a2a18','#180f08',lw*0.6);
+      P([[.4,.42],[.5,.12],[.57,.32],[.63,.16],[.6,.42]],'#f3a83a','#d2641a',lw*0.4);
+      P([[.46,.42],[.52,.26],[.58,.42]],'#ffe07a');
+      break;
+    case 'fogata':
+      C(.5,.66,.3,'#3a2a1a','#180f08',lw*0.6);
+      for(let k = 0; k < 5; k++){ const a = k * 1.25; L(.5,.66,.5 + Math.cos(a)*.28,.66 + Math.sin(a)*.18,'#6e4a26',lw*1.1); }
+      P([[.34,.66],[.46,.24],[.52,.46],[.62,.2],[.68,.66]],'#f3a83a','#d2641a',lw*0.4);
+      P([[.42,.66],[.5,.38],[.58,.66]],'#ffe07a');
+      break;
+    case 'mesa_banquete':
+      R(.03,.24,.94,.52,'#a9743f','#5b3a1c');
+      L(.03,.5,.97,.5,'#8a5c30',lw*0.7);
+      for(let k = 1; k < 6; k++) L(k/6,.24,k/6,.76,'#8a5c30',lw*0.45);
+      for(let k = 0; k < 3; k++){ C(.18 + k*.32,.37,.06,'#e9e2cf','#b3a98e',lw*0.4); C(.18 + k*.32,.63,.06,'#e9e2cf','#b3a98e',lw*0.4); }
+      break;
+    case 'cama_doble': {
+      R(.06,.04,.88,.92,'#7a5230','#4a2f14');
+      R(.12,.1,.76,.82,'#ece4d2','#b5a98e');
+      R(.16,.13,.34,.18,'#f7f3e8','#c2b89e');
+      R(.5,.13,.34,.18,'#f7f3e8','#c2b89e');
+      const manta = PALETA_TELA[Math.floor(h1 * PALETA_TELA.length)];
+      R(.12,.4,.76,.52, manta, sombrear(manta,-0.35));
+      L(.12,.54,.88,.54, sombrear(manta,-0.3), lw*0.6);
+      break;
+    }
+    case 'altar_mayor':
+      R(.08,.34,.84,.46,'#cdc6b4','#8a8275');
+      R(.18,.26,.64,.26,'#f2eee2','#b8b09c');
+      C(.32,.36,.05,'#e8c34a','#8a6a1e',lw*0.5); C(.68,.36,.05,'#e8c34a','#8a6a1e',lw*0.5);
+      L(.5,.28,.5,.5,'#b08a2e',lw*0.9); L(.4,.36,.6,.36,'#b08a2e',lw*0.9);
+      break;
+    case 'gran_estatua':
+      R(.22,.8,.56,.16,'#9c948a','#56504a',lw*0.7);
+      C(.5,.26,.15,'#c2bbae','#6e665c',lw*0.7);
+      P([[.3,.8],[.36,.4],[.64,.4],[.7,.8]],'#c2bbae','#6e665c',lw*0.7);
+      L(.36,.5,.26,.7,'#6e665c',lw*0.7); L(.64,.5,.74,.7,'#6e665c',lw*0.7);
+      break;
+    case 'estatua_grande':
+      R(.2,.86,.6,.12,'#9c948a','#56504a',lw*0.6);
+      C(.5,.2,.13,'#b5ada0','#6e665c',lw*0.6);
+      P([[.32,.86],[.38,.34],[.62,.34],[.68,.86]],'#b5ada0','#6e665c',lw*0.6);
+      break;
+    case 'gran_tesoro':
+      for(let k = 0; k < 16; k++){ const a = hx(m.x,m.y,40+k), b = hx(m.x,m.y,60+k); C(.15+a*.7,.4+b*.5,.09,'#e8c34a','#9a7a1e',lw*0.4); }
+      C(.4,.55,.07,'#f4dd72'); C(.6,.62,.06,'#f4dd72'); C(.5,.72,.06,'#f4dd72');
+      P([[.28,.5],[.34,.36],[.42,.5],[.34,.62]],'#3aa0c8','#1c6a8a',lw*0.4);
+      P([[.6,.42],[.67,.3],[.74,.42],[.67,.54]],'#c8407a','#8a1c4a',lw*0.4);
+      break;
     default: C(.5,.5,.25,'#a9743f','#5b3a1c');
   }
 }
@@ -1493,6 +1793,98 @@ function dibujarPuerta(c, x, y, ts, horiz, secreta){
     c.fillStyle = CF('#3c3c42');
     c.beginPath(); c.arc(x*ts + ts*0.5, y*ts + ts*0.4, ts*0.05, 0, Math.PI*2); c.fill();
   }
+}
+
+/* ventana dibujada: bloque de muro con cristal y montantes */
+function dibujarVentana(c, x, y, ts, horiz, tema){
+  const lw = Math.max(1, ts * 0.06);
+  c.fillStyle = CF(sombrear((tema && tema.muro) || '#6f6254', -0.05));
+  c.fillRect(x*ts - 0.4, y*ts - 0.4, ts + 0.8, ts + 0.8);
+  c.fillStyle = CF('#bcd6e2'); c.strokeStyle = CS('#3a342a'); c.lineWidth = lw;
+  if(horiz){
+    c.fillRect(x*ts + ts*0.34, y*ts + ts*0.06, ts*0.32, ts*0.88);
+    c.strokeRect(x*ts + ts*0.34, y*ts + ts*0.06, ts*0.32, ts*0.88);
+    c.beginPath();
+    c.moveTo(x*ts + ts*0.5, y*ts + ts*0.06); c.lineTo(x*ts + ts*0.5, y*ts + ts*0.94);
+    c.moveTo(x*ts + ts*0.34, y*ts + ts*0.5); c.lineTo(x*ts + ts*0.66, y*ts + ts*0.5);
+  } else {
+    c.fillRect(x*ts + ts*0.06, y*ts + ts*0.34, ts*0.88, ts*0.32);
+    c.strokeRect(x*ts + ts*0.06, y*ts + ts*0.34, ts*0.88, ts*0.32);
+    c.beginPath();
+    c.moveTo(x*ts + ts*0.06, y*ts + ts*0.5); c.lineTo(x*ts + ts*0.94, y*ts + ts*0.5);
+    c.moveTo(x*ts + ts*0.5, y*ts + ts*0.34); c.lineTo(x*ts + ts*0.5, y*ts + ts*0.66);
+  }
+  c.lineWidth = lw*0.6; c.stroke();
+}
+
+/* ───── Iluminación y sombras ───── */
+const FUENTES_LUZ = {
+  antorcha: [4.6,'#ffb24a',1.05], fogata: [5.2,'#ff9a3c',1.2], brasero: [3.8,'#ff9a3c',0.95],
+  chimenea: [4.4,'#ff8a3a',1.0], forja: [3.8,'#ff7a30',1.0], vela: [2.6,'#ffd27a',0.7],
+  caldero: [2.4,'#7be0b0',0.55], circulo_magico: [3.4,'#9a7cff',0.8], lava: [3.2,'#ff7a30',1.0]
+};
+let luzActiva = true;
+function losLuz(x0, y0, x1, y1){          // los muros bloquean la luz (línea de visión)
+  const dx = Math.abs(x1-x0), dy = Math.abs(y1-y0);
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy, x = x0, y = y0;
+  while(true){
+    if(!(x === x0 && y === y0) && !(x === x1 && y === y1) && getT(x, y) === T.MURO) return false;
+    if(x === x1 && y === y1) break;
+    const e2 = 2*err;
+    if(e2 > -dy){ err -= dy; x += sx; }
+    if(e2 < dx){ err += dx; y += sy; }
+  }
+  return true;
+}
+function fuentesDeLuz(){
+  const out = [];
+  for(const m of E.mob){ const f = FUENTES_LUZ[m.t]; if(f) out.push([m.x, m.y, f[0], f[1], f[2]]); }
+  for(let y = 0; y < E.rows; y++)
+    for(let x = 0; x < E.cols; x++)
+      if(E.tiles[idx(x,y)] === T.VENTANA) out.push([x, y, 3.4, '#cfe6ff', 0.85]);
+  return out;
+}
+function calcularLuz(fuentes){
+  const L = new Float32Array(E.cols * E.rows);
+  for(const f of fuentes){
+    const sx = f[0], sy = f[1], R = f[2], inten = f[4], r = Math.ceil(R);
+    for(let y = Math.max(0, sy-r); y <= Math.min(E.rows-1, sy+r); y++)
+      for(let x = Math.max(0, sx-r); x <= Math.min(E.cols-1, sx+r); x++){
+        const d = Math.hypot(x-sx, y-sy);
+        if(d > R || !losLuz(sx, sy, x, y)) continue;
+        const k = 1 - d/R;
+        L[idx(x,y)] += inten * k * k;
+      }
+  }
+  return L;
+}
+function dibujarLuces(c, ts, estilo){
+  if(estilo.modo === 'tinta') return;
+  const fuentes = fuentesDeLuz();
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  for(const f of fuentes){
+    const cx = (f[0] + 0.5) * ts, cy = (f[1] + 0.5) * ts, rad = f[2] * ts;
+    const [rr, gg, bb] = _rgb(f[3]);
+    const a = (estilo.modo === 'oscuro' ? 0.5 : 0.28) * f[4];
+    const g = c.createRadialGradient(cx, cy, ts*0.2, cx, cy, rad);
+    g.addColorStop(0, 'rgba(' + rr + ',' + gg + ',' + bb + ',' + a + ')');
+    g.addColorStop(1, 'rgba(' + rr + ',' + gg + ',' + bb + ',0)');
+    c.fillStyle = g; c.beginPath(); c.arc(cx, cy, rad, 0, Math.PI*2); c.fill();
+  }
+  c.restore();
+  const amb = estilo.modo === 'oscuro' ? 0.08 : (estilo.modo === 'sepia' ? 0.62 : 0.66);
+  const maxOsc = estilo.modo === 'oscuro' ? 0.94 : 0.42;
+  const L = calcularLuz(fuentes);
+  for(let y = 0; y < E.rows; y++)
+    for(let x = 0; x < E.cols; x++){
+      if(E.tiles[idx(x,y)] === T.ROCA) continue;
+      const a = (1 - Math.min(1, amb + L[idx(x,y)])) * maxOsc;
+      if(a <= 0.004) continue;
+      c.fillStyle = 'rgba(6,7,16,' + a.toFixed(3) + ')';
+      c.fillRect(x*ts, y*ts, ts, ts);
+    }
 }
 
 /* ───── Renderizado del mapa (compartido pantalla / exportación) ───── */
@@ -1608,16 +2000,22 @@ function render(c, ts, estilo, conRejilla){
       if(getT(x+1, y) !== T.MURO){ c.moveTo(x*ts + ts, y*ts); c.lineTo(x*ts + ts, y*ts + ts); }
     }
   c.stroke();
-  // puertas (normales y secretas)
+  // puertas (normales y secretas) y ventanas
   for(let y = 0; y < E.rows; y++)
     for(let x = 0; x < E.cols; x++){
       const t = E.tiles[idx(x,y)];
-      if(t !== T.PUERTA && t !== T.SECRETA) continue;
-      const horiz = esPiso(getT(x-1,y)) && esPiso(getT(x+1,y));
-      dibujarPuerta(c, x, y, ts, horiz, t === T.SECRETA);
+      if(t === T.PUERTA || t === T.SECRETA){
+        const horiz = esPiso(getT(x-1,y)) && esPiso(getT(x+1,y));
+        dibujarPuerta(c, x, y, ts, horiz, t === T.SECRETA);
+      } else if(t === T.VENTANA){
+        const horiz = esPiso(getT(x-1,y)) || esPiso(getT(x+1,y));
+        dibujarVentana(c, x, y, ts, horiz, tema);
+      }
     }
   // mobiliario (las alfombras ya están dibujadas)
   for(const m of E.mob) if(!esOverlay(m.t)) dibujarMob(c, m, ts, estilo);
+  // iluminación y sombras (por encima del mobiliario)
+  if(luzActiva) dibujarLuces(c, ts, estilo);
   // etiquetas
   c.textAlign = 'center'; c.textBaseline = 'middle';
   c.font = 'italic ' + Math.max(8, ts * 0.52) + 'px Georgia, serif';
@@ -1628,6 +2026,43 @@ function render(c, ts, estilo, conRejilla){
     c.fillStyle = estilo.texto;
     c.fillText(e.texto, px, py);
   }
+}
+
+/* ───── Leyenda: objetos presentes en el mapa que se muestra ───── */
+const NOMBRE_MOB = Object.fromEntries(CATALOGO_MOB);
+let leyendaActiva = true;
+function dibujarMobIcono(c, t, cell){
+  if(esOverlay(t)){
+    c.fillStyle = CF(OVERLAYS[t].f); c.fillRect(0, 0, cell, cell);
+    c.strokeStyle = CS(OVERLAYS[t].b); c.lineWidth = 1; c.strokeRect(1, 1, cell-2, cell-2);
+    return;
+  }
+  const [fw, fh] = tamMob(t), ts = cell / Math.max(fw, fh);
+  c.save();
+  c.translate((cell - fw*ts)/2, (cell - fh*ts)/2);
+  dibujarMob(c, { x: 0, y: 0, t }, ts, null);
+  c.restore();
+}
+function dibujarLeyenda(c, map, estilo, anchoVista){
+  const tipos = [...new Set(map.mob.map(m => m.t))].filter(t => NOMBRE_MOB[t]).sort();
+  if(!tipos.length) return;
+  const cell = 20, pad = 10, lh = 24, cab = 22;
+  const bw = 184, bh = pad + cab + tipos.length*lh + 4;
+  const x0 = Math.max(8, (anchoVista || lienzo.clientWidth) - bw - 12), y0 = 12;
+  c.save();
+  c.fillStyle = 'rgba(18,14,9,0.88)'; c.strokeStyle = 'rgba(201,166,75,0.55)'; c.lineWidth = 1;
+  c.fillRect(x0, y0, bw, bh); c.strokeRect(x0, y0, bw, bh);
+  c.fillStyle = '#c9a64b'; c.font = 'bold 13px Georgia, serif'; c.textAlign = 'left'; c.textBaseline = 'middle';
+  c.fillText('Leyenda', x0+pad, y0+pad+6);
+  const prevModo = _modo; _modo = estilo.modo;
+  tipos.forEach((t, i) => {
+    const ry = y0 + pad + cab + i*lh;
+    c.save(); c.translate(x0+pad, ry); dibujarMobIcono(c, t, cell); c.restore();
+    c.fillStyle = '#e3d8b8'; c.font = '12px Segoe UI, sans-serif'; c.textBaseline = 'middle';
+    c.fillText(NOMBRE_MOB[t], x0+pad+cell+8, ry + cell/2);
+  });
+  _modo = prevModo;
+  c.restore();
 }
 
 /* ════════════ VISTA: lienzo, zoom y desplazamiento ════════════ */
@@ -1642,25 +2077,47 @@ function redimensionar(){
   lienzo.height = lienzo.clientHeight * dpr;
   dibujar();
 }
+function mundoBbox(){
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for(const m of mapas){ x0 = Math.min(x0, m.offX); y0 = Math.min(y0, m.offY); x1 = Math.max(x1, m.offX + m.cols); y1 = Math.max(y1, m.offY + m.rows); }
+  if(!isFinite(x0)) return { x: 0, y: 0, w: E.cols, h: E.rows };
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+function mapaEnCelda(gx, gy){
+  for(let i = mapas.length - 1; i >= 0; i--){ const m = mapas[i]; if(gx >= m.offX && gy >= m.offY && gx < m.offX + m.cols && gy < m.offY + m.rows) return i; }
+  return -1;
+}
 function encajarVista(){
   const w = lienzo.clientWidth, h = lienzo.clientHeight;
   if(w < 10 || h < 10){
-    // el lienzo aún no tiene tamaño (primer render): reintentar
     requestAnimationFrame(() => { redimensionar(); encajarVista(); dibujar(); });
     return;
   }
-  vista.zoom = Math.min(w / (E.cols * TS), h / (E.rows * TS)) * 0.92;
-  vista.ox = (w - E.cols * TS * vista.zoom) / 2;
-  vista.oy = (h - E.rows * TS * vista.zoom) / 2;
+  const bb = mundoBbox();
+  vista.zoom = Math.min(w / (bb.w * TS), h / (bb.h * TS)) * 0.92;
+  vista.ox = (w - bb.w * TS * vista.zoom) / 2 - bb.x * TS * vista.zoom;
+  vista.oy = (h - bb.h * TS * vista.zoom) / 2 - bb.y * TS * vista.zoom;
 }
 function dibujar(){
   const dpr = window.devicePixelRatio || 1;
   const estilo = ESTILOS[E.estetica] || ESTILOS.color;
+  const rej = document.getElementById('in-rejilla').checked;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = sombrear(estilo.fondo, estilo.modo === 'oscuro' ? -0.3 : -0.09);
   ctx.fillRect(0, 0, lienzo.clientWidth, lienzo.clientHeight);
   ctx.setTransform(dpr * vista.zoom, 0, 0, dpr * vista.zoom, dpr * vista.ox, dpr * vista.oy);
-  render(ctx, TS, estilo, document.getElementById('in-rejilla').checked);
+  for(const m of mapas){
+    ctx.save();
+    ctx.translate(m.offX * TS, m.offY * TS);
+    const est = ESTILOS[m.estetica] || estilo;
+    conMapa(m, () => render(ctx, TS, est, rej));
+    if(mapas.length > 1 && m === E){           // resalta la pieza activa
+      ctx.strokeStyle = 'rgba(201,166,75,0.95)'; ctx.lineWidth = 2.5 / vista.zoom;
+      ctx.strokeRect(-1, -1, m.cols * TS + 2, m.rows * TS + 2);
+    }
+    ctx.restore();
+  }
+  if(leyendaActiva){ ctx.setTransform(dpr, 0, 0, dpr, 0, 0); dibujarLeyenda(ctx, E, estilo); }
 }
 function pantallaACasilla(mx, my){
   return [
@@ -1698,18 +2155,18 @@ function rehacer(){
 }
 
 /* ════════════ PERSISTENCIA ════════════ */
-const CLAVE_LS = 'generador_interiores_v1';
+const CLAVE_LS = 'generador_interiores_v2';
 let temporizadorGuardar = null;
 function guardarLocal(){
   clearTimeout(temporizadorGuardar);
   temporizadorGuardar = setTimeout(() => {
     try{
       localStorage.setItem(CLAVE_LS, JSON.stringify({
-        seed: E.seed, tipo: E.tipo, cols: E.cols, rows: E.rows, estetica: E.estetica,
-        tiles: E.tiles, mob: E.mob, etq: E.etq, enlaces: E.enlaces
+        activo,
+        mapas: mapas.map(m => ({ seed: m.seed, tipo: m.tipo, cols: m.cols, rows: m.rows, estetica: m.estetica, tiles: m.tiles, mob: m.mob, etq: m.etq, enlaces: m.enlaces, offX: m.offX, offY: m.offY }))
       }));
       document.getElementById('estado-guardado').textContent =
-        'Guardado en este navegador · ' + new Date().toLocaleTimeString();
+        mapas.length + ' mapa(s) · guardado ' + new Date().toLocaleTimeString();
     }catch(err){ /* almacenamiento lleno o bloqueado: se ignora */ }
   }, 300);
 }
@@ -1755,10 +2212,35 @@ function generarDesdePanel(){
 $('bt-generar').addEventListener('click', generarDesdePanel);
 $('bt-azar').addEventListener('click', () => { $('in-seed').value = semillaAleatoria(); generarDesdePanel(); });
 $('in-estetica').addEventListener('change', () => {
-  E.estetica = $('in-estetica').value;
+  const v = $('in-estetica').value;
+  mapas.forEach(m => m.estetica = v);    // el estilo se aplica a todo el puzzle
   actualizarURL(); dibujar(); guardarLocal();
 });
 $('in-rejilla').addEventListener('change', dibujar);
+$('in-luz').addEventListener('change', () => { luzActiva = $('in-luz').checked; dibujar(); });
+$('in-leyenda').addEventListener('change', () => { leyendaActiva = $('in-leyenda').checked; dibujar(); });
+function añadirMapa(){
+  const bb = mundoBbox();
+  const m = nuevoMapa();
+  m.offX = bb.x + bb.w + 1;   // engancha a la derecha del conjunto
+  m.offY = bb.y;
+  m.estetica = E.estetica;
+  conMapa(m, () => generar(semillaAleatoria(), $('in-tipo').value, +$('in-ancho').value, +$('in-alto').value));
+  mapas.push(m); activo = mapas.length - 1; E = mapas[activo];
+  pilaDeshacer.length = 0; pilaRehacer.length = 0;
+  sincronizarPanel(); encajarVista(); dibujar(); guardarLocal();
+  aviso('Mapa ' + mapas.length + ' añadido al puzzle');
+}
+function quitarMapa(){
+  if(mapas.length <= 1){ aviso('Sólo queda un mapa'); return; }
+  mapas.splice(activo, 1);
+  activo = Math.min(activo, mapas.length - 1); E = mapas[activo];
+  pilaDeshacer.length = 0; pilaRehacer.length = 0;
+  sincronizarPanel(); encajarVista(); dibujar(); guardarLocal();
+  aviso('Mapa quitado · quedan ' + mapas.length);
+}
+$('bt-add-mapa').addEventListener('click', añadirMapa);
+$('bt-del-mapa').addEventListener('click', quitarMapa);
 $('bt-deshacer').addEventListener('click', deshacer);
 $('bt-rehacer').addEventListener('click', rehacer);
 $('bt-enlace').addEventListener('click', () => {
@@ -1804,6 +2286,10 @@ function aplicarHerr(x, y){
       if(t === T.PUERTA) setT(x, y, T.SUELO);
       else { setT(x, y, T.PUERTA); quitarMobEn(x, y); }
       break;
+    case 'ventana':
+      if(t === T.VENTANA) setT(x, y, T.MURO);
+      else if(t === T.MURO) setT(x, y, T.VENTANA);
+      break;
     case 'mobiliario':
       if(esPiso(t)){ quitarMobEn(x, y); E.mob.push({ x, y, t: $('in-mob').value }); }
       break;
@@ -1821,12 +2307,20 @@ function aplicarHerr(x, y){
 
 function etiquetaCercana(mx, my){
   const [fx, fy] = pantallaAMapa(mx, my);
-  let mejor = -1, md = 2.2;
-  E.etq.forEach((e, i) => {
-    const d = Math.hypot(e.x - fx, e.y - fy);
-    if(d < md){ md = d; mejor = i; }
-  });
+  let mejor = -1, md = 2.2, mejorMapa = activo;
+  mapas.forEach((m, mi) => m.etq.forEach((e, i) => {
+    const d = Math.hypot(e.x + m.offX - fx, e.y + m.offY - fy);
+    if(d < md){ md = d; mejor = i; mejorMapa = mi; }
+  }));
+  if(mejor >= 0 && mejorMapa !== activo){ activo = mejorMapa; E = mapas[activo]; sincronizarPanel(); }
   return mejor;
+}
+/* selecciona la pieza del puzzle bajo el cursor y devuelve coords locales */
+function seleccionarMapaEn(mx, my){
+  const [gx, gy] = pantallaACasilla(mx, my);
+  const im = mapaEnCelda(gx, gy);
+  if(im >= 0 && im !== activo){ activo = im; E = mapas[activo]; sincronizarPanel(); }
+  return [gx - E.offX, gy - E.offY];
 }
 
 lienzo.addEventListener('pointerdown', e => {
@@ -1846,14 +2340,16 @@ lienzo.addEventListener('pointerdown', e => {
       apuntarUndo();
       arrastre = { modo: 'etiqueta', i, movida: false };
     } else {
-      const [fx, fy] = pantallaAMapa(mx, my);
+      const [gfx, gfy] = pantallaAMapa(mx, my);
+      const im = mapaEnCelda(Math.floor(gfx), Math.floor(gfy));
+      if(im >= 0 && im !== activo){ activo = im; E = mapas[activo]; sincronizarPanel(); }
       const txt = prompt('Texto de la nueva etiqueta:');
-      if(txt && txt.trim()){ apuntarUndo(); addEtq(fx, fy, txt.trim()); dibujar(); guardarLocal(); }
+      if(txt && txt.trim()){ apuntarUndo(); addEtq(gfx - E.offX, gfy - E.offY, txt.trim()); dibujar(); guardarLocal(); }
     }
     return;
   }
+  const [tx, ty] = seleccionarMapaEn(mx, my);
   apuntarUndo();
-  const [tx, ty] = pantallaACasilla(mx, my);
   arrastre = { modo: 'pintar', ult: tx + ',' + ty };
   aplicarHerr(tx, ty);
 });
@@ -1861,10 +2357,11 @@ lienzo.addEventListener('pointerdown', e => {
 lienzo.addEventListener('pointermove', e => {
   const r = lienzo.getBoundingClientRect();
   const mx = e.clientX - r.left, my = e.clientY - r.top;
-  const [tx, ty] = pantallaACasilla(mx, my);
+  const [gx, gy] = pantallaACasilla(mx, my);
+  const tx = gx - E.offX, ty = gy - E.offY;
   $('coords').textContent = dentro(tx, ty)
-    ? 'Casilla ' + tx + ', ' + ty + ' · ' + (tx*5) + '×' + (ty*5) + ' pies · zoom ' + Math.round(vista.zoom*100) + '%'
-    : 'zoom ' + Math.round(vista.zoom*100) + '%';
+    ? 'Mapa ' + (activo+1) + ' · casilla ' + tx + ', ' + ty + ' · ' + (tx*5) + '×' + (ty*5) + ' pies · zoom ' + Math.round(vista.zoom*100) + '%'
+    : 'zoom ' + Math.round(vista.zoom*100) + '% · ' + mapas.length + ' mapa(s)';
   if(!arrastre) return;
   if(arrastre.modo === 'pan'){
     vista.ox = arrastre.ox + (mx - arrastre.mx);
@@ -1878,7 +2375,7 @@ lienzo.addEventListener('pointermove', e => {
     }
   } else if(arrastre.modo === 'etiqueta'){
     const [fx, fy] = pantallaAMapa(mx, my);
-    E.etq[arrastre.i].x = fx; E.etq[arrastre.i].y = fy;
+    E.etq[arrastre.i].x = fx - E.offX; E.etq[arrastre.i].y = fy - E.offY;
     arrastre.movida = true;
     dibujar();
   }
@@ -1919,17 +2416,23 @@ lienzo.addEventListener('wheel', e => {
 /* ════════════ EXPORTACIÓN ════════════ */
 $('bt-png').addEventListener('click', () => {
   const estilo = ESTILOS[E.estetica] || ESTILOS.color;
-  const ts = 52, margen = ts;                       // ≥2× la resolución de pantalla
+  const ts = 52, margen = ts, bb = mundoBbox();     // ≥2× la resolución de pantalla
   const cv = document.createElement('canvas');
-  cv.width = E.cols * ts + margen * 2;
-  cv.height = E.rows * ts + margen * 2;
+  cv.width = bb.w * ts + margen * 2;
+  cv.height = bb.h * ts + margen * 2;
   const c = cv.getContext('2d');
   c.fillStyle = estilo.fondo;
   c.fillRect(0, 0, cv.width, cv.height);
-  c.translate(margen, margen);
-  render(c, ts, estilo, $('in-rejilla-png').checked);
+  const rej = $('in-rejilla-png').checked;
+  for(const m of mapas){                            // todas las piezas del puzzle en una imagen
+    c.save();
+    c.translate(margen + (m.offX - bb.x) * ts, margen + (m.offY - bb.y) * ts);
+    conMapa(m, () => render(c, ts, ESTILOS[m.estetica] || estilo, rej));
+    c.restore();
+  }
+  if(leyendaActiva) dibujarLeyenda(c, E, estilo, cv.width);
   const a = document.createElement('a');
-  a.download = 'mapa_' + E.tipo + '_' + E.seed.replace(/[^\w-]/g, '_') + '.png';
+  a.download = 'mapa_' + E.tipo + '_' + E.seed.replace(/[^\w-]/g, '_') + (mapas.length > 1 ? '_x' + mapas.length : '') + '.png';
   a.href = cv.toDataURL('image/png');
   a.click();
   aviso('PNG descargado');
@@ -1937,11 +2440,11 @@ $('bt-png').addEventListener('click', () => {
 
 $('bt-exp-json').addEventListener('click', () => {
   const datos = JSON.stringify({
-    version: 1, seed: E.seed, tipo: E.tipo, cols: E.cols, rows: E.rows,
-    estetica: E.estetica, tiles: E.tiles, mob: E.mob, etq: E.etq, enlaces: E.enlaces
+    version: 2, activo,
+    mapas: mapas.map(m => ({ seed: m.seed, tipo: m.tipo, cols: m.cols, rows: m.rows, estetica: m.estetica, tiles: m.tiles, mob: m.mob, etq: m.etq, enlaces: m.enlaces, offX: m.offX, offY: m.offY }))
   });
   const a = document.createElement('a');
-  a.download = 'mapa_' + E.tipo + '_' + E.seed.replace(/[^\w-]/g, '_') + '.json';
+  a.download = (mapas.length > 1 ? 'puzzle_' : 'mapa_') + E.tipo + '_' + E.seed.replace(/[^\w-]/g, '_') + '.json';
   a.href = URL.createObjectURL(new Blob([datos], { type: 'application/json' }));
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -1956,13 +2459,16 @@ $('in-archivo').addEventListener('change', e => {
   lector.onload = () => {
     try{
       const d = JSON.parse(lector.result);
-      if(!d.tiles || !d.cols || !d.rows) throw new Error('formato');
       pilaDeshacer.length = 0; pilaRehacer.length = 0;
-      E.seed = d.seed || 'importado'; E.tipo = d.tipo || 'mazmorra';
-      E.cols = d.cols; E.rows = d.rows; E.estetica = normalizarEstetica(d.estetica || E.estetica);
-      E.tiles = d.tiles; E.mob = d.mob || []; E.etq = d.etq || []; E.enlaces = d.enlaces || [];
+      if(d.mapas && Array.isArray(d.mapas) && d.mapas.length){
+        mapas = d.mapas.map(m => Object.assign(nuevoMapa(), m, { shell: null, estetica: normalizarEstetica(m.estetica || 'color') }));
+        activo = Math.min(d.activo || 0, mapas.length - 1); E = mapas[activo];
+      } else if(d.tiles && d.cols && d.rows){
+        const m = Object.assign(nuevoMapa(), { seed: d.seed || 'importado', tipo: d.tipo || 'mazmorra', cols: d.cols, rows: d.rows, estetica: normalizarEstetica(d.estetica || 'color'), tiles: d.tiles, mob: d.mob || [], etq: d.etq || [], enlaces: d.enlaces || [] });
+        mapas = [m]; activo = 0; E = m;
+      } else throw new Error('formato');
       sincronizarPanel(); actualizarURL(); encajarVista(); dibujar(); guardarLocal();
-      aviso('Mapa importado');
+      aviso(mapas.length > 1 ? 'Puzzle importado (' + mapas.length + ' mapas)' : 'Mapa importado');
     }catch(err){ aviso('Archivo no válido'); }
   };
   lector.readAsText(f);
@@ -1978,18 +2484,11 @@ function arrancar(){
   let guardado = null;
   try{ guardado = JSON.parse(localStorage.getItem(CLAVE_LS)); }catch(err){ guardado = null; }
 
-  const coincide = guardado && (!pSeed || (
-    guardado.seed === pSeed && guardado.tipo === (pTipo || guardado.tipo) &&
-    (!pAncho || guardado.cols === pAncho) && (!pAlto || guardado.rows === pAlto)
-  ));
-
-  if(coincide){
-    E.seed = guardado.seed; E.tipo = guardado.tipo;
-    E.cols = guardado.cols; E.rows = guardado.rows;
-    E.estetica = pEst || normalizarEstetica(guardado.estetica || 'color');
-    E.tiles = guardado.tiles; E.mob = guardado.mob || [];
-    E.etq = guardado.etq || []; E.enlaces = guardado.enlaces || [];
+  if(guardado && guardado.mapas && guardado.mapas.length && !pSeed){
+    mapas = guardado.mapas.map(m => Object.assign(nuevoMapa(), m, { shell: null, estetica: pEst || normalizarEstetica(m.estetica || 'color') }));
+    activo = Math.min(guardado.activo || 0, mapas.length - 1); E = mapas[activo];
   } else {
+    mapas = [nuevoMapa()]; activo = 0; E = mapas[0];
     if(pEst) E.estetica = pEst;
     generar(pSeed || semillaAleatoria(), pTipo && TEMAS_MAPA[pTipo] ? pTipo : 'mazmorra',
             pAncho || 40, pAlto || 30);
